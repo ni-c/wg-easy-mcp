@@ -420,6 +420,84 @@ describe('error handling', () => {
   });
 });
 
+describe('enable_client / disable_client', () => {
+  it.each(['enable', 'disable'] as const)(
+    'posts to the %s endpoint',
+    async (action) => {
+      const calls = stubFetch(() => jsonResponse({ success: true }));
+      const client = await connectClient();
+
+      const result = (await client.callTool({
+        name: `${action}_client`,
+        arguments: { clientId: 7 },
+      })) as CallToolResult;
+
+      expect(result.isError).toBeUndefined();
+      expect(calls[0]?.url).toBe(`http://wg.test:51821/api/client/7/${action}`);
+      expect(calls[0]?.init?.method).toBe('POST');
+    }
+  );
+});
+
+describe('get_client_qrcode', () => {
+  it('returns the SVG markup', async () => {
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg"></svg>';
+    stubFetch(() => textResponse(svg));
+    const client = await connectClient();
+
+    const result = (await client.callTool({
+      name: 'get_client_qrcode',
+      arguments: { clientId: 1 },
+    })) as CallToolResult;
+
+    expect(resultText(result)).toBe(svg);
+  });
+});
+
+describe('generate_one_time_link', () => {
+  it('generates a link and returns it with the download path', async () => {
+    const calls = stubFetch((url, init) =>
+      init?.method === 'POST'
+        ? jsonResponse({ success: true })
+        : jsonResponse({ id: 4, oneTimeLink: { oneTimeLink: 'tok123' } })
+    );
+    const client = await connectClient();
+
+    const result = (await client.callTool({
+      name: 'generate_one_time_link',
+      arguments: { clientId: 4 },
+    })) as CallToolResult;
+
+    expect(calls[0]?.url).toBe(
+      'http://wg.test:51821/api/client/4/generateOneTimeLink'
+    );
+    const data = JSON.parse(resultText(result));
+    expect(data).toEqual({
+      success: true,
+      oneTimeLink: 'tok123',
+      path: '/cnf/tok123',
+    });
+  });
+
+  it('reports success without a link when the API does not return one', async () => {
+    stubFetch((url, init) =>
+      init?.method === 'POST'
+        ? jsonResponse({ success: true })
+        : jsonResponse({ id: 4, oneTimeLink: null })
+    );
+    const client = await connectClient();
+
+    const result = (await client.callTool({
+      name: 'generate_one_time_link',
+      arguments: { clientId: 4 },
+    })) as CallToolResult;
+
+    const data = JSON.parse(resultText(result));
+    expect(data.success).toBe(true);
+    expect(data.note).toContain('not returned');
+  });
+});
+
 describe('get_server_info', () => {
   it('tolerates failures of individual sections', async () => {
     stubFetch((url) =>
