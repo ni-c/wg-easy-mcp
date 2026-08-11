@@ -1,5 +1,11 @@
 # wg-easy-mcp
 
+[![CI](https://img.shields.io/github/actions/workflow/status/ni-c/wg-easy-mcp/ci.yml?branch=main&label=CI)](https://github.com/ni-c/wg-easy-mcp/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/wg-easy-mcp)](https://www.npmjs.com/package/wg-easy-mcp)
+[![npm downloads](https://img.shields.io/npm/dm/wg-easy-mcp)](https://www.npmjs.com/package/wg-easy-mcp)
+[![node](https://img.shields.io/node/v/wg-easy-mcp)](https://nodejs.org)
+[![license](https://img.shields.io/npm/l/wg-easy-mcp)](LICENSE)
+
 A [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server for administering [wg-easy](https://github.com/wg-easy/wg-easy) (WireGuard Easy) instances.
 
 Lets MCP clients like Claude Code, Claude Desktop or Codex manage your WireGuard VPN: list, create, update, enable/disable and delete clients, fetch configuration files and QR codes, and inspect the server status — all through the wg-easy v15 REST API.
