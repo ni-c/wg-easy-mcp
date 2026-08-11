@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-08-11
+
+### Added
+
+- Listed in the official [MCP Registry](https://registry.modelcontextprotocol.io)
+  as `io.github.ni-c/wg-easy-mcp`; the release workflow publishes registry
+  updates automatically via GitHub OIDC (`server.json`, `mcpName` field).
+- npm provenance attestations for published packages.
+- CodeQL default setup scanning.
+
+### Changed
+
+- The repository is now public.
+- Dependency majors: zod 4 (first release including it; vitest 4 and
+  eslint 10 in the dev toolchain).
+
 ## [0.2.1] - 2026-08-11
 
 ### Added

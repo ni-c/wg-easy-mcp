@@ -1,0 +1,47 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.ni-c/wg-easy-mcp",
+  "description": "Administer wg-easy (WireGuard Easy) v15 instances: manage VPN clients, fetch configs and QR codes, inspect server status",
+  "repository": {
+    "url": "https://github.com/ni-c/wg-easy-mcp",
+    "source": "github"
+  },
+  "version": "0.2.2",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "wg-easy-mcp",
+      "version": "0.2.2",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "WG_EASY_URL",
+          "description": "Base URL of the wg-easy web UI, e.g. https://vpn.example.com:51821",
+          "isRequired": true,
+          "format": "string"
+        },
+        {
+          "name": "WG_EASY_USERNAME",
+          "description": "Username of a wg-easy admin account (2FA must be disabled)",
+          "isRequired": true,
+          "format": "string"
+        },
+        {
+          "name": "WG_EASY_PASSWORD",
+          "description": "Password of the wg-easy admin account",
+          "isRequired": true,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "WG_EASY_INSECURE_TLS",
+          "description": "Set to true to accept self-signed TLS certificates (scoped to the wg-easy connection)",
+          "isRequired": false,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}

@@ -125,7 +125,7 @@ npm run lint      # eslint + prettier check
 1. Bump the version in `package.json` and add a `CHANGELOG.md` entry.
 2. Commit, then tag and push: `git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin main vX.Y.Z`
 
-The release workflow runs the test suite, publishes to npm (via [trusted publishing](https://docs.npmjs.com/trusted-publishers), no token) and creates a GitHub release from the changelog entry.
+The release workflow runs the test suite, publishes to npm (via [trusted publishing](https://docs.npmjs.com/trusted-publishers), no token, with provenance), creates a GitHub release from the changelog entry and updates the entry in the official [MCP Registry](https://registry.modelcontextprotocol.io) (`io.github.ni-c/wg-easy-mcp`, via GitHub OIDC).
 
 ## License
 
