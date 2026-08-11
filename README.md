@@ -114,6 +114,13 @@ npm test          # run the vitest test suite
 npm run lint      # eslint + prettier check
 ```
 
+### Releasing
+
+1. Bump the version in `package.json` and add a `CHANGELOG.md` entry.
+2. Commit, then tag and push: `git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin main vX.Y.Z`
+
+The release workflow runs the test suite, publishes to npm (via [trusted publishing](https://docs.npmjs.com/trusted-publishers), no token) and creates a GitHub release from the changelog entry.
+
 ## License
 
 [MIT](LICENSE)
