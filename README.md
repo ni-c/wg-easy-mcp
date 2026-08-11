@@ -6,7 +6,7 @@ Lets MCP clients like Claude Code, Claude Desktop or Codex manage your WireGuard
 
 ## Requirements
 
-- Node.js ≥ 20
+- Node.js ≥ 22
 - A running **wg-easy v15+** instance
 - **2FA (TOTP) must be disabled** for the account used by this server — the wg-easy API only supports Basic Authentication and does not work with 2FA enabled
 
@@ -16,12 +16,17 @@ Lets MCP clients like Claude Code, Claude Desktop or Codex manage your WireGuard
 
 Configuration is provided via environment variables:
 
-| Variable               | Required | Description                                                         |
-| ---------------------- | -------- | ------------------------------------------------------------------- |
-| `WG_EASY_URL`          | yes      | Base URL of the wg-easy web UI, e.g. `http://vpn.example.com:51821` |
-| `WG_EASY_USERNAME`     | yes      | Username of a wg-easy admin account                                 |
-| `WG_EASY_PASSWORD`     | yes      | Password of that account                                            |
-| `WG_EASY_INSECURE_TLS` | no       | Set to `true` to accept self-signed TLS certificates                |
+| Variable               | Required | Description                                                                             |
+| ---------------------- | -------- | --------------------------------------------------------------------------------------- |
+| `WG_EASY_URL`          | yes      | Base URL of the wg-easy web UI, e.g. `https://vpn.example.com:51821`                    |
+| `WG_EASY_USERNAME`     | yes      | Username of a wg-easy admin account                                                     |
+| `WG_EASY_PASSWORD`     | yes      | Password of that account                                                                |
+| `WG_EASY_INSECURE_TLS` | no       | Set to `true` to accept self-signed TLS certificates (scoped to the wg-easy connection) |
+
+> **Use `https://`.** With a plain-`http` URL the Basic Auth credentials and all
+> WireGuard private keys travel unencrypted; the server prints a warning unless
+> the host is local. For self-signed certificates prefer a proper internal CA
+> over `WG_EASY_INSECURE_TLS`.
 
 ## Installation
 
@@ -29,7 +34,7 @@ Configuration is provided via environment variables:
 
 ```bash
 claude mcp add wg-easy -s user \
-  -e WG_EASY_URL=http://vpn.example.com:51821 \
+  -e WG_EASY_URL=https://vpn.example.com:51821 \
   -e WG_EASY_USERNAME=admin \
   -e WG_EASY_PASSWORD=your-password \
   -- npx -y wg-easy-mcp
@@ -46,7 +51,7 @@ Add to your `claude_desktop_config.json`:
       "command": "npx",
       "args": ["-y", "wg-easy-mcp"],
       "env": {
-        "WG_EASY_URL": "http://vpn.example.com:51821",
+        "WG_EASY_URL": "https://vpn.example.com:51821",
         "WG_EASY_USERNAME": "admin",
         "WG_EASY_PASSWORD": "your-password"
       }
@@ -63,7 +68,7 @@ Add to your `~/.codex/config.toml`:
 [mcp_servers.wg-easy]
 command = "npx"
 args = ["-y", "wg-easy-mcp"]
-env = { WG_EASY_URL = "http://vpn.example.com:51821", WG_EASY_USERNAME = "admin", WG_EASY_PASSWORD = "your-password" }
+env = { WG_EASY_URL = "https://vpn.example.com:51821", WG_EASY_USERNAME = "admin", WG_EASY_PASSWORD = "your-password" }
 ```
 
 ### From source
@@ -85,17 +90,20 @@ npm run build
 | `create_client`                    | Create a new client (`name`, optional `expiresAt`)                                          |
 | `update_client`                    | Update a client; only the provided fields are changed                                       |
 | `enable_client` / `disable_client` | Enable or disable a client                                                                  |
-| `delete_client`                    | Permanently delete a client — requires `confirm=true`                                       |
+| `delete_client`                    | Permanently delete a client — two-step, guarded by a confirmation token                     |
 | `get_client_config`                | Get the client's WireGuard `.conf` file                                                     |
 | `get_client_qrcode`                | Get the client configuration as a QR code (SVG)                                             |
 | `generate_one_time_link`           | Generate a one-time config download link (requires one-time links to be enabled in wg-easy) |
-| `get_server_info`                  | Release/update status, general settings and interface configuration                         |
+| `get_server_info`                  | Release/update status, general settings and interface configuration (secrets redacted)      |
 
 ### Safety
 
-- `delete_client` refuses to run without an explicit `confirm=true` parameter and reports the client name, so an MCP client can ask the user for confirmation first.
+- `delete_client` is a two-step operation: the first call returns a random confirmation token (valid for 5 minutes, bound to the client ID) and only a second call with that exact token deletes the client. Unlike a plain `confirm=true` parameter, the token cannot be guessed or pre-supplied by the model or by injected text.
+- `get_server_info` redacts secret fields (`privateKey`, `preSharedKey`, `password`, session/TOTP secrets) from the admin API responses.
+- Upstream error bodies are truncated and HTML error pages (reverse proxies) are dropped before being returned to the MCP client.
+- `WG_EASY_INSECURE_TLS` only relaxes certificate validation for the wg-easy connection — it does not disable TLS verification process-wide.
 - Tools carry MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`) so hosts can apply appropriate permission policies.
-- Keep in mind that `get_client_config` and `get_client_qrcode` return the client's **private key** — treat tool output as sensitive.
+- Keep in mind that `get_client_config` and `get_client_qrcode` return the client's **private key**, and a `generate_one_time_link` URL allows an unauthenticated config download — treat tool output as sensitive.
 
 ## Development
 

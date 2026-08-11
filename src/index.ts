@@ -8,11 +8,8 @@ async function main(): Promise<void> {
   const config = loadConfig();
 
   if (config.insecureTls) {
-    // Applies to the whole process; acceptable for this single-purpose
-    // server that only talks to the configured wg-easy instance.
-    process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
     console.error(
-      'wg-easy-mcp: WG_EASY_INSECURE_TLS=true — TLS certificate validation is disabled'
+      'wg-easy-mcp: WG_EASY_INSECURE_TLS=true — TLS certificate validation is disabled for the wg-easy connection'
     );
   }
 

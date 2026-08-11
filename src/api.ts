@@ -1,4 +1,12 @@
+import {
+  Agent,
+  fetch as undiciFetch,
+  type RequestInit as UndiciRequestInit,
+} from 'undici';
+
 import type { Config } from './config.js';
+
+const REQUEST_TIMEOUT_MS = 15_000;
 
 export class WgEasyApiError extends Error {
   constructor(
@@ -22,12 +30,23 @@ export class WgEasyApiError extends Error {
 export class WgEasyApi {
   private readonly baseUrl: string;
   private readonly authHeader: string;
+  /**
+   * Only set when `WG_EASY_INSECURE_TLS` is enabled. Scopes the relaxed
+   * certificate validation to requests against the configured wg-easy host
+   * instead of disabling it process-wide via NODE_TLS_REJECT_UNAUTHORIZED.
+   */
+  private readonly insecureDispatcher?: Agent;
 
   constructor(config: Config) {
     this.baseUrl = config.url;
     this.authHeader =
       'Basic ' +
       Buffer.from(`${config.username}:${config.password}`).toString('base64');
+    if (config.insecureTls) {
+      this.insecureDispatcher = new Agent({
+        connect: { rejectUnauthorized: false },
+      });
+    }
   }
 
   async request(
@@ -39,13 +58,26 @@ export class WgEasyApi {
       Authorization: this.authHeader,
       Accept: 'application/json, text/plain, */*',
     };
-    const init: RequestInit = { method, headers };
+    const init: RequestInit = {
+      method,
+      headers,
+      redirect: 'error',
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    };
     if (body !== undefined) {
       headers['Content-Type'] = 'application/json';
       init.body = JSON.stringify(body);
     }
 
-    const response = await fetch(`${this.baseUrl}${path}`, init);
+    const url = `${this.baseUrl}${path}`;
+    // The insecure dispatcher requires undici's own fetch; the default path
+    // uses the (stubbable) global fetch.
+    const response = this.insecureDispatcher
+      ? await undiciFetch(url, {
+          ...init,
+          dispatcher: this.insecureDispatcher,
+        } as UndiciRequestInit)
+      : await fetch(url, init);
     const text = await response.text();
 
     if (!response.ok) {

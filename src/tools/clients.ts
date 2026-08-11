@@ -1,3 +1,5 @@
+import { randomBytes } from 'node:crypto';
+
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
@@ -42,7 +44,18 @@ const UPDATABLE_FIELDS = [
   'dns',
 ] as const;
 
+const DELETE_TOKEN_TTL_MS = 5 * 60 * 1000;
+
 export function registerClientTools(server: McpServer, api: WgEasyApi): void {
+  // Deleting requires a server-generated confirmation token: a plain boolean
+  // confirm parameter could be set by the model on the first call (or via
+  // prompt injection through client names), a random token from a previous
+  // response cannot.
+  const pendingDeletes = new Map<
+    number,
+    { token: string; expiresAt: number }
+  >();
+
   server.registerTool(
     'list_clients',
     {
@@ -214,33 +227,41 @@ export function registerClientTools(server: McpServer, api: WgEasyApi): void {
     {
       title: 'Delete WireGuard client',
       description:
-        'Permanently delete a WireGuard client. This is irreversible: the client loses VPN access and its keys cannot be restored. Requires confirm=true.',
+        'Permanently delete a WireGuard client. This is irreversible: the client loses VPN access and its keys cannot be restored. The first call returns a short-lived confirmation token; ask the user for confirmation, then call again with confirmToken.',
       inputSchema: {
         clientId,
-        confirm: z
-          .boolean()
-          .default(false)
+        confirmToken: z
+          .string()
+          .optional()
           .describe(
-            'Must be true to actually delete the client. Ask the user for confirmation first.'
+            'Confirmation token from a previous delete_client call for the same client. Omit on the first call.'
           ),
       },
       annotations: { destructiveHint: true },
     },
-    ({ clientId, confirm }) =>
+    ({ clientId, confirmToken }) =>
       run(async () => {
-        const current = (await api.get(`/api/client/${clientId}`)) as {
-          name?: string;
-        };
-        if (!confirm) {
+        const pending = pendingDeletes.get(clientId);
+        const valid =
+          pending !== undefined &&
+          confirmToken === pending.token &&
+          Date.now() < pending.expiresAt;
+        if (!valid) {
+          // Fails with an API error if the client does not exist.
+          await api.get(`/api/client/${clientId}`);
+          const token = randomBytes(16).toString('hex');
+          pendingDeletes.set(clientId, {
+            token,
+            expiresAt: Date.now() + DELETE_TOKEN_TTL_MS,
+          });
           return errorResult(
-            `Refusing to delete client ${clientId} ("${current.name ?? 'unknown'}") without confirmation. ` +
-              'Deleting is irreversible. Call delete_client again with confirm=true after the user confirmed.'
+            `Deleting client ${clientId} is irreversible. Confirm with the user first, ` +
+              `then call delete_client again within 5 minutes with confirmToken: "${token}".`
           );
         }
+        pendingDeletes.delete(clientId);
         await api.delete(`/api/client/${clientId}`);
-        return textResult(
-          `Client ${clientId} ("${current.name ?? 'unknown'}") deleted.`
-        );
+        return textResult(`Client ${clientId} deleted.`);
       })
   );
 
@@ -249,7 +270,7 @@ export function registerClientTools(server: McpServer, api: WgEasyApi): void {
     {
       title: 'Get WireGuard client configuration',
       description:
-        'Get the WireGuard configuration file (wg .conf format, including the private key) for a client.',
+        'Get the WireGuard configuration file (wg .conf format) for a client. SENSITIVE: the output contains the client private key — treat it as a secret and do not repeat it unnecessarily.',
       inputSchema: { clientId },
       annotations: { readOnlyHint: true },
     },
@@ -266,7 +287,7 @@ export function registerClientTools(server: McpServer, api: WgEasyApi): void {
     {
       title: 'Get WireGuard client QR code',
       description:
-        'Get the client configuration as a QR code (SVG markup) for scanning with the WireGuard mobile app.',
+        'Get the client configuration as a QR code (SVG markup) for scanning with the WireGuard mobile app. SENSITIVE: the QR code encodes the client private key — treat it as a secret.',
       inputSchema: { clientId },
       annotations: { readOnlyHint: true },
     },
@@ -281,7 +302,7 @@ export function registerClientTools(server: McpServer, api: WgEasyApi): void {
     {
       title: 'Generate one-time config link',
       description:
-        'Generate a one-time download link for a client configuration that can be shared with the end user. Requires WG_ENABLE_ONE_TIME_LINKS to be enabled on the wg-easy instance.',
+        'Generate a one-time download link for a client configuration that can be shared with the end user. Requires WG_ENABLE_ONE_TIME_LINKS to be enabled on the wg-easy instance. SENSITIVE: anyone with the link can download the full client configuration without authentication — share it only with the intended user.',
       inputSchema: { clientId },
       annotations: {},
     },
