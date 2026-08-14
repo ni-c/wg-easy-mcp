@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `Dockerfile` (multi-stage, non-root, stdio entrypoint) and `.dockerignore`,
+  so registries that build and introspect the server in a container no longer
+  have to guess a build.
+
+### Changed
+
+- Missing `WG_EASY_URL`/`WG_EASY_USERNAME`/`WG_EASY_PASSWORD` no longer exit at
+  startup. The server completes the MCP handshake and lists its tools without
+  credentials; they are required when a tool actually calls the API, which then
+  fails with the same setup instructions as before. URL validation still exits,
+  since a bad URL can leak the credentials.
+
 ## [0.2.2] - 2026-08-11
 
 ### Added

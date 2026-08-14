@@ -34,6 +34,10 @@ Configuration is provided via environment variables:
 > the host is local. For self-signed certificates prefer a proper internal CA
 > over `WG_EASY_INSECURE_TLS`.
 
+Without credentials the server still starts and lists its tools (so registries
+and inspectors can introspect it), but every tool call fails with setup
+instructions instead of reaching the wg-easy API.
+
 ## Installation
 
 ### Claude Code
@@ -85,6 +89,47 @@ cd wg-easy-mcp
 npm install
 npm run build
 # then use `node /path/to/wg-easy-mcp/dist/index.js` as the command
+```
+
+### Docker
+
+```bash
+docker build -t wg-easy-mcp .
+docker run -i --rm \
+  -e WG_EASY_URL=https://vpn.example.com:51821 \
+  -e WG_EASY_USERNAME=admin \
+  -e WG_EASY_PASSWORD=your-password \
+  wg-easy-mcp
+```
+
+The image talks MCP over stdio, so clients need `docker run -i` (no port is
+exposed):
+
+```json
+{
+  "mcpServers": {
+    "wg-easy": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "WG_EASY_URL",
+        "-e",
+        "WG_EASY_USERNAME",
+        "-e",
+        "WG_EASY_PASSWORD",
+        "wg-easy-mcp"
+      ],
+      "env": {
+        "WG_EASY_URL": "https://vpn.example.com:51821",
+        "WG_EASY_USERNAME": "admin",
+        "WG_EASY_PASSWORD": "your-password"
+      }
+    }
+  }
+}
 ```
 
 ## Tools

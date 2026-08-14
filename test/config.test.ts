@@ -44,11 +44,21 @@ describe('loadConfig', () => {
     expect(environment.WG_EASY_PASSWORD).toBeUndefined();
   });
 
-  it('exits when required variables are missing', () => {
+  it('warns but does not exit when required variables are missing', () => {
+    // Registries and inspectors start the server without credentials and
+    // expect the MCP handshake to succeed.
     const exit = mockExit();
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-    expect(() => loadConfig({})).toThrow('process.exit');
-    expect(exit).toHaveBeenCalledWith(1);
+
+    const config = loadConfig({});
+
+    expect(config).toEqual({
+      url: undefined,
+      username: undefined,
+      password: undefined,
+      insecureTls: false,
+    });
+    expect(exit).not.toHaveBeenCalled();
     expect(error.mock.calls[0]?.[0]).toContain(
       'WG_EASY_URL, WG_EASY_USERNAME, WG_EASY_PASSWORD'
     );

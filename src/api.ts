@@ -4,7 +4,11 @@ import {
   type RequestInit as UndiciRequestInit,
 } from 'undici';
 
-import type { Config } from './config.js';
+import {
+  missingConfigKeys,
+  missingConfigMessage,
+  type Config,
+} from './config.js';
 
 const REQUEST_TIMEOUT_MS = 15_000;
 
@@ -28,6 +32,7 @@ export class WgEasyApiError extends Error {
  * the account.
  */
 export class WgEasyApi {
+  private readonly config: Config;
   private readonly baseUrl: string;
   private readonly authHeader: string;
   /**
@@ -38,10 +43,13 @@ export class WgEasyApi {
   private readonly insecureDispatcher?: Agent;
 
   constructor(config: Config) {
-    this.baseUrl = config.url;
+    this.config = config;
+    this.baseUrl = config.url ?? '';
     this.authHeader =
       'Basic ' +
-      Buffer.from(`${config.username}:${config.password}`).toString('base64');
+      Buffer.from(`${config.username ?? ''}:${config.password ?? ''}`).toString(
+        'base64'
+      );
     if (config.insecureTls) {
       this.insecureDispatcher = new Agent({
         connect: { rejectUnauthorized: false },
@@ -54,6 +62,12 @@ export class WgEasyApi {
     path: string,
     body?: unknown
   ): Promise<unknown> {
+    // The credentials are only required here, not at startup, so that the
+    // server can still be started and introspected without them.
+    const missing = missingConfigKeys(this.config);
+    if (missing.length > 0) {
+      throw new Error(missingConfigMessage(missing));
+    }
     const headers: Record<string, string> = {
       Authorization: this.authHeader,
       Accept: 'application/json, text/plain, */*',

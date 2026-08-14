@@ -44,8 +44,8 @@ function stubFetch(
   return calls;
 }
 
-async function connectClient(): Promise<Client> {
-  const server = createServer(config);
+async function connectClient(serverConfig: Config = config): Promise<Client> {
+  const server = createServer(serverConfig);
   const client = new Client({ name: 'test-client', version: '0.0.0' });
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
@@ -86,6 +86,37 @@ describe('tool registration', () => {
       'list_clients',
       'update_client',
     ]);
+  });
+
+  it('lists all tools without credentials', async () => {
+    // This is the path registries and inspectors take: no credentials.
+    const client = await connectClient({
+      url: undefined,
+      username: undefined,
+      password: undefined,
+      insecureTls: false,
+    });
+    const { tools } = await client.listTools();
+    expect(tools).toHaveLength(11);
+  });
+
+  it('fails a call without credentials with the setup instructions', async () => {
+    const calls = stubFetch(() => jsonResponse({}));
+    const client = await connectClient({
+      url: undefined,
+      username: undefined,
+      password: undefined,
+      insecureTls: false,
+    });
+
+    const result = (await client.callTool({
+      name: 'list_clients',
+      arguments: {},
+    })) as CallToolResult;
+
+    expect(result.isError).toBe(true);
+    expect(resultText(result)).toContain('WG_EASY_URL');
+    expect(calls).toHaveLength(0);
   });
 
   it('marks delete_client as destructive and list_clients as read-only', async () => {

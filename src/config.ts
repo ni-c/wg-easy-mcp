@@ -1,19 +1,47 @@
 export interface Config {
-  /** Base URL of the wg-easy instance, e.g. `https://vpn.example.com:51821` */
-  url: string;
-  username: string;
-  password: string;
+  /**
+   * Base URL of the wg-easy instance, e.g. `https://vpn.example.com:51821`.
+   * May be undefined together with the credentials: the server still starts
+   * and lists its tools, every API call then fails with
+   * {@link missingConfigMessage}.
+   */
+  url: string | undefined;
+  username: string | undefined;
+  password: string | undefined;
   insecureTls: boolean;
 }
 
+/** Shown when credentials are missing — on startup and on every API call. */
+export function missingConfigMessage(missing: string[]): string {
+  return (
+    `missing required environment variable(s): ${missing.join(', ')}\n` +
+    'Required: WG_EASY_URL (e.g. https://vpn.example.com:51821), WG_EASY_USERNAME, WG_EASY_PASSWORD\n' +
+    'Optional: WG_EASY_INSECURE_TLS=true to accept self-signed certificates'
+  );
+}
+
+/** Names of the required environment variables that are unset in `config`. */
+export function missingConfigKeys(config: Config): string[] {
+  return [
+    !config.url && 'WG_EASY_URL',
+    !config.username && 'WG_EASY_USERNAME',
+    !config.password && 'WG_EASY_PASSWORD',
+  ].filter((v): v is string => Boolean(v));
+}
+
 /**
- * Reads the configuration from environment variables and exits the process
- * with a helpful message if a required variable is missing.
+ * Reads the configuration from environment variables.
+ *
+ * Missing credentials are only a warning, not a fatal error: the server must
+ * be able to complete the MCP handshake and answer `tools/list` without them
+ * so registries and inspectors can introspect it. A malformed `WG_EASY_URL`
+ * still exits, because that one can leak the credentials.
  */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const url = env.WG_EASY_URL;
   const username = env.WG_EASY_USERNAME;
   const password = env.WG_EASY_PASSWORD;
+  const insecureTls = env.WG_EASY_INSECURE_TLS === 'true';
 
   const missing = [
     !url && 'WG_EASY_URL',
@@ -21,13 +49,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     !password && 'WG_EASY_PASSWORD',
   ].filter((v): v is string => Boolean(v));
 
-  if (missing.length > 0 || !url || !username || !password) {
-    console.error(
-      `wg-easy-mcp: missing required environment variable(s): ${missing.join(', ')}\n` +
-        'Required: WG_EASY_URL (e.g. https://vpn.example.com:51821), WG_EASY_USERNAME, WG_EASY_PASSWORD\n' +
-        'Optional: WG_EASY_INSECURE_TLS=true to accept self-signed certificates'
-    );
-    process.exit(1);
+  if (missing.length > 0) {
+    console.error(`wg-easy-mcp: ${missingConfigMessage(missing)}`);
+  }
+
+  if (!url) {
+    return { url: undefined, username, password, insecureTls };
   }
 
   let parsed: URL;
@@ -54,7 +81,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     url: url.replace(/\/+$/, ''),
     username,
     password,
-    insecureTls: env.WG_EASY_INSECURE_TLS === 'true',
+    insecureTls,
   };
 
   // Don't keep the credentials in the environment for the process lifetime

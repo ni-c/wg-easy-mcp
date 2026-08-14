@@ -15,7 +15,11 @@ async function main(): Promise<void> {
 
   const server = createServer(config);
   await server.connect(new StdioServerTransport());
-  console.error(`wg-easy-mcp: connected, targeting ${config.url}`);
+  console.error(
+    config.url
+      ? `wg-easy-mcp: connected, targeting ${config.url}`
+      : 'wg-easy-mcp: connected without configuration — tools are listed but every call will fail'
+  );
 }
 
 main().catch((error: unknown) => {
