@@ -22,8 +22,17 @@ jobs:
       - name: Sync version from package.json into server.json
         run: |
           version="$(node -p "require('./package.json').version")"
-          jq --arg v "$version" '.version = $v | .packages[0].version = $v' \
-            server.json > server.tmp && mv server.tmp server.json
+          # The npm package carries a version field; the OCI package must not —
+          # its version lives in the identifier tag. Do not simplify this back
+          # to .packages[0].version.
+          jq --arg v "$version" '
+            .version = $v
+            | .packages |= map(
+                if .registryType == "oci"
+                then .identifier = "ghcr.io/ni-c/wg-easy-mcp:" + $v
+                else .version = $v
+                end
+              )' server.json > server.tmp && mv server.tmp server.json
       - name: Install mcp-publisher
         run: |
           curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher

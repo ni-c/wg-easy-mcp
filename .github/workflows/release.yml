@@ -54,11 +54,41 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The registry verifies the OCI package by pulling it, so the tag has to
+      # exist first. It is pushed by ci.yml's publish job, which runs on the
+      # same tag in parallel with this workflow.
+      - name: Wait for the GHCR image tag
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          for i in $(seq 1 15); do
+            token="$(curl -s "https://ghcr.io/token?scope=repository:ni-c/wg-easy-mcp:pull&service=ghcr.io" | jq -r .token)"
+            if curl -sf -o /dev/null -H "Authorization: Bearer $token" \
+                 -H 'Accept: application/vnd.oci.image.index.v1+json' \
+                 "https://ghcr.io/v2/ni-c/wg-easy-mcp/manifests/$version"; then
+              echo "ghcr.io/ni-c/wg-easy-mcp:$version is available"
+              exit 0
+            fi
+            echo "waiting for ghcr.io/ni-c/wg-easy-mcp:$version ($i/15)"
+            sleep 20
+          done
+          echo "Timed out. If the CI publish job succeeded, check that the GHCR" >&2
+          echo "package visibility is public — it does not inherit from the repo." >&2
+          echo "Fix it, then re-run mcp-registry.yml via workflow_dispatch." >&2
+          exit 1
       - name: Sync version from package.json into server.json
         run: |
           version="$(node -p "require('./package.json').version")"
-          jq --arg v "$version" '.version = $v | .packages[0].version = $v' \
-            server.json > server.tmp && mv server.tmp server.json
+          # The npm package carries a version field; the OCI package must not —
+          # its version lives in the identifier tag. Do not simplify this back
+          # to .packages[0].version.
+          jq --arg v "$version" '
+            .version = $v
+            | .packages |= map(
+                if .registryType == "oci"
+                then .identifier = "ghcr.io/ni-c/wg-easy-mcp:" + $v
+                else .version = $v
+                end
+              )' server.json > server.tmp && mv server.tmp server.json
       - name: Install mcp-publisher
         run: |
           curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
