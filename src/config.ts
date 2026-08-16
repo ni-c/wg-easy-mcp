@@ -70,6 +70,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     );
     process.exit(1);
   }
+  if (parsed.username !== '' || parsed.password !== '') {
+    // Credentials embedded in the URL would be echoed back on every startup
+    // log line and prepended to every request path. They belong in
+    // WG_EASY_USERNAME/WG_EASY_PASSWORD, which are wiped from the
+    // environment below.
+    console.error(
+      'wg-easy-mcp: WG_EASY_URL must not contain credentials (user:password@host). ' +
+        'Use WG_EASY_USERNAME and WG_EASY_PASSWORD instead.'
+    );
+    process.exit(1);
+  }
   if (parsed.protocol === 'http:' && !isLoopbackHost(parsed.hostname)) {
     console.error(
       'wg-easy-mcp: WARNING: WG_EASY_URL uses plain http to a non-local host — ' +

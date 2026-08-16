@@ -1,7 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import type { WgEasyApi } from '../api.js';
-import { jsonResult, run } from '../result.js';
+import { run, upstreamJsonResult } from '../result.js';
 
 const SENSITIVE_KEYS = new Set([
   'privatekey',
@@ -68,7 +68,10 @@ export function registerServerInfoTools(
             };
           }
         }
-        return jsonResult(result);
+        return upstreamJsonResult(
+          result,
+          'Query a single section directly through the wg-easy UI if it was cut off.'
+        );
       })
   );
 }

@@ -82,6 +82,29 @@ describe('loadConfig', () => {
     expect(exit).toHaveBeenCalledWith(1);
   });
 
+  it('exits when the URL embeds credentials', () => {
+    // user:password@host would be echoed in the startup log and prefixed to
+    // every request path, bypassing the env-wipe above.
+    const exit = mockExit();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(() =>
+      loadConfig(
+        env({ WG_EASY_URL: 'https://admin:hunter2@vpn.example.com:51821' })
+      )
+    ).toThrow('process.exit');
+    expect(exit).toHaveBeenCalledWith(1);
+    expect(String(error.mock.calls.at(-1)?.[0])).not.toContain('hunter2');
+  });
+
+  it('exits when the URL embeds a username only', () => {
+    const exit = mockExit();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(() =>
+      loadConfig(env({ WG_EASY_URL: 'https://admin@vpn.example.com:51821' }))
+    ).toThrow('process.exit');
+    expect(exit).toHaveBeenCalledWith(1);
+  });
+
   it('warns on plain http to a non-local host', () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     loadConfig(env({ WG_EASY_URL: 'http://wg.example.com:51821' }));

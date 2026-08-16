@@ -4,7 +4,13 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
 import type { WgEasyApi } from '../api.js';
-import { errorResult, jsonResult, run, textResult } from '../result.js';
+import {
+  errorResult,
+  run,
+  textResult,
+  upstreamJsonResult,
+  upstreamTextResult,
+} from '../result.js';
 
 const clientId = z.coerce
   .number()
@@ -80,7 +86,10 @@ export function registerClientTools(server: McpServer, api: WgEasyApi): void {
         if (filter) query.set('filter', filter);
         if (sort) query.set('sort', sort);
         const suffix = query.size > 0 ? `?${query.toString()}` : '';
-        return jsonResult(await api.get(`/api/client${suffix}`));
+        return upstreamJsonResult(
+          await api.get(`/api/client${suffix}`),
+          'Narrow the result with the filter argument, or fetch a single client with get_client.'
+        );
       })
   );
 
@@ -93,7 +102,12 @@ export function registerClientTools(server: McpServer, api: WgEasyApi): void {
       annotations: { readOnlyHint: true },
     },
     ({ clientId }) =>
-      run(async () => jsonResult(await api.get(`/api/client/${clientId}`)))
+      run(async () =>
+        upstreamJsonResult(
+          await api.get(`/api/client/${clientId}`),
+          'Fetch the configuration file separately with get_client_config.'
+        )
+      )
   );
 
   server.registerTool(
@@ -115,8 +129,9 @@ export function registerClientTools(server: McpServer, api: WgEasyApi): void {
     },
     ({ name, expiresAt }) =>
       run(async () =>
-        jsonResult(
-          await api.post('/api/client', { name, expiresAt: expiresAt ?? null })
+        upstreamJsonResult(
+          await api.post('/api/client', { name, expiresAt: expiresAt ?? null }),
+          'Re-read the new client with get_client.'
         )
       )
   );
@@ -189,7 +204,10 @@ export function registerClientTools(server: McpServer, api: WgEasyApi): void {
         for (const [key, value] of Object.entries(changes)) {
           if (value !== undefined) body[key] = value;
         }
-        return jsonResult(await api.post(`/api/client/${clientId}`, body));
+        return upstreamJsonResult(
+          await api.post(`/api/client/${clientId}`, body),
+          'Re-read the client with get_client.'
+        );
       })
   );
 
@@ -203,7 +221,10 @@ export function registerClientTools(server: McpServer, api: WgEasyApi): void {
     },
     ({ clientId }) =>
       run(async () =>
-        jsonResult(await api.post(`/api/client/${clientId}/enable`))
+        upstreamJsonResult(
+          await api.post(`/api/client/${clientId}/enable`),
+          'Re-read the client with get_client.'
+        )
       )
   );
 
@@ -218,7 +239,10 @@ export function registerClientTools(server: McpServer, api: WgEasyApi): void {
     },
     ({ clientId }) =>
       run(async () =>
-        jsonResult(await api.post(`/api/client/${clientId}/disable`))
+        upstreamJsonResult(
+          await api.post(`/api/client/${clientId}/disable`),
+          'Re-read the client with get_client.'
+        )
       )
   );
 
@@ -276,8 +300,9 @@ export function registerClientTools(server: McpServer, api: WgEasyApi): void {
     },
     ({ clientId }) =>
       run(async () =>
-        textResult(
-          String(await api.get(`/api/client/${clientId}/configuration`))
+        upstreamTextResult(
+          String(await api.get(`/api/client/${clientId}/configuration`)),
+          'Download the configuration from the wg-easy UI if it was cut off.'
         )
       )
   );
@@ -293,7 +318,10 @@ export function registerClientTools(server: McpServer, api: WgEasyApi): void {
     },
     ({ clientId }) =>
       run(async () =>
-        textResult(String(await api.get(`/api/client/${clientId}/qrcode.svg`)))
+        upstreamTextResult(
+          String(await api.get(`/api/client/${clientId}/qrcode.svg`)),
+          'Use get_client_config instead if the QR code markup was cut off.'
+        )
       )
   );
 
@@ -317,16 +345,14 @@ export function registerClientTools(server: McpServer, api: WgEasyApi): void {
             ? client.oneTimeLink
             : client.oneTimeLink?.oneTimeLink;
         if (!link) {
-          return jsonResult({
-            success: true,
-            note: 'One-time link generated, but the link value was not returned by the API. Check the wg-easy UI.',
-          });
+          return textResult(
+            'One-time link generated, but the link value was not returned by the API. Check the wg-easy UI.'
+          );
         }
-        return jsonResult({
-          success: true,
-          oneTimeLink: link,
-          path: `/cnf/${link}`,
-        });
+        return upstreamJsonResult(
+          { success: true, oneTimeLink: link, path: `/cnf/${link}` },
+          'Re-read the client with get_client.'
+        );
       })
   );
 }
