@@ -5,10 +5,19 @@
 [![npm downloads](https://img.shields.io/npm/dm/wg-easy-mcp)](https://www.npmjs.com/package/wg-easy-mcp)
 [![node](https://img.shields.io/node/v/wg-easy-mcp)](https://nodejs.org)
 [![license](https://img.shields.io/npm/l/wg-easy-mcp)](LICENSE)
+[![container](https://img.shields.io/badge/ghcr.io-ni--c%2Fwg--easy--mcp-2496ed?logo=docker&logoColor=white)](https://github.com/ni-c/wg-easy-mcp/pkgs/container/wg-easy-mcp)
+[![docs](https://img.shields.io/badge/docs-wg--easy--mcp.ni--c.de-4f46e5)](https://wg-easy-mcp.ni-c.de)
 
 A [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server for administering [wg-easy](https://github.com/wg-easy/wg-easy) (WireGuard Easy) instances.
 
 Lets MCP clients like Claude Code, Claude Desktop or Codex manage your WireGuard VPN: list, create, update, enable/disable and delete clients, fetch configuration files and QR codes, and inspect the server status — all through the wg-easy v15 REST API.
+
+**📖 Full documentation: [wg-easy-mcp.ni-c.de](https://wg-easy-mcp.ni-c.de)**
+
+<!-- SYNC: rendered from docs/public/architecture.svg, which carries its own
+     prefers-color-scheme block. The inline twin lives in docs/index.md. -->
+
+![Architecture: an MCP client speaks stdio to wg-easy-mcp, which calls the wg-easy v15 REST API over HTTPS with Basic Authentication](https://wg-easy-mcp.ni-c.de/architecture.svg)
 
 ## Requirements
 
@@ -93,13 +102,14 @@ npm run build
 
 ### Docker
 
+A multi-arch image (`linux/amd64`, `linux/arm64`) with an SBOM and build provenance is published to GitHub Container Registry:
+
 ```bash
-docker build -t wg-easy-mcp .
 docker run -i --rm \
   -e WG_EASY_URL=https://vpn.example.com:51821 \
   -e WG_EASY_USERNAME=admin \
   -e WG_EASY_PASSWORD=your-password \
-  wg-easy-mcp
+  ghcr.io/ni-c/wg-easy-mcp:latest
 ```
 
 The image talks MCP over stdio, so clients need `docker run -i` (no port is
@@ -120,7 +130,7 @@ exposed):
         "WG_EASY_USERNAME",
         "-e",
         "WG_EASY_PASSWORD",
-        "wg-easy-mcp"
+        "ghcr.io/ni-c/wg-easy-mcp:latest"
       ],
       "env": {
         "WG_EASY_URL": "https://vpn.example.com:51821",
@@ -151,10 +161,14 @@ exposed):
 
 - `delete_client` is a two-step operation: the first call returns a random confirmation token (valid for 5 minutes, bound to the client ID) and only a second call with that exact token deletes the client. Unlike a plain `confirm=true` parameter, the token cannot be guessed or pre-supplied by the model or by injected text.
 - `get_server_info` redacts secret fields (`privateKey`, `preSharedKey`, `password`, session/TOTP secrets) from the admin API responses.
+- Everything the wg-easy API returns carries an explicit **untrusted-data marker** and a 60 000-character budget. Client names, DNS entries and endpoints are free-form strings, so they are marked as data to report rather than instructions to follow, and a single oversized field cannot flood the model's context.
+- A `WG_EASY_URL` containing embedded credentials (`user:password@host`) is rejected at startup — they would otherwise be echoed in the startup log and prefixed onto every request.
 - Upstream error bodies are truncated and HTML error pages (reverse proxies) are dropped before being returned to the MCP client.
 - `WG_EASY_INSECURE_TLS` only relaxes certificate validation for the wg-easy connection — it does not disable TLS verification process-wide.
 - Tools carry MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`) so hosts can apply appropriate permission policies.
 - Keep in mind that `get_client_config` and `get_client_qrcode` return the client's **private key**, and a `generate_one_time_link` URL allows an unauthenticated config download — treat tool output as sensitive.
+
+The full trust model is in [SECURITY.md](SECURITY.md) and, in prose, at [wg-easy-mcp.ni-c.de/guide/security](https://wg-easy-mcp.ni-c.de/guide/security).
 
 ## Development
 
@@ -163,6 +177,15 @@ npm install
 npm run build     # compile TypeScript to dist/
 npm test          # run the vitest test suite
 npm run lint      # eslint + prettier check
+npm run test:coverage
+```
+
+CI runs the suite on Node 22 and 24 and adds `npm audit`, CodeQL and a Trivy scan of the container image on both architectures. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+The documentation site lives in `docs/` with its own manifest:
+
+```bash
+cd docs && npm install && npm run dev
 ```
 
 ### Releasing
@@ -170,7 +193,9 @@ npm run lint      # eslint + prettier check
 1. Bump the version in `package.json` and add a `CHANGELOG.md` entry.
 2. Commit, then tag and push: `git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin main vX.Y.Z`
 
-The release workflow runs the test suite, publishes to npm (via [trusted publishing](https://docs.npmjs.com/trusted-publishers), no token, with provenance), creates a GitHub release from the changelog entry and updates the entry in the official [MCP Registry](https://registry.modelcontextprotocol.io) (`io.github.ni-c/wg-easy-mcp`, via GitHub OIDC).
+The release workflow runs the test suite, publishes to npm (via [trusted publishing](https://docs.npmjs.com/trusted-publishers), no token, with provenance), creates a GitHub release from the changelog entry and updates the entry in the official [MCP Registry](https://registry.modelcontextprotocol.io) (`io.github.ni-c/wg-easy-mcp`, via GitHub OIDC). The container image is published to GHCR by the CI workflow on the same tag.
+
+`server.json` lists both an npm and an OCI package; the registry job syncs the version into both before publishing. If it ever fails, fix `main` and re-run `mcp-registry.yml` via `workflow_dispatch` — re-running the tag job checks out the old tree.
 
 ## License
 

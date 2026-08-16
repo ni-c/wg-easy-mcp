@@ -7,11 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-16
+
 ### Added
 
 - `Dockerfile` (multi-stage, non-root, stdio entrypoint) and `.dockerignore`,
   so registries that build and introspect the server in a container no longer
   have to guess a build.
+- Multi-arch container images (`linux/amd64`, `linux/arm64`) published to
+  `ghcr.io/ni-c/wg-easy-mcp` with an SBOM and build provenance. `server.json`
+  now lists the OCI package alongside the npm one.
+- Documentation site at [wg-easy-mcp.ni-c.de](https://wg-easy-mcp.ni-c.de):
+  guide, per-tool reference, environment variables and changelog.
+- CI additions: CodeQL, a Trivy scan of the image on both architectures, and
+  the GHCR publish job. `main` now requires all of them.
+- `CONTRIBUTING.md`, issue forms and GitHub Discussions.
 
 ### Changed
 
@@ -20,6 +30,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   credentials; they are required when a tool actually calls the API, which then
   fails with the same setup instructions as before. URL validation still exits,
   since a bad URL can leak the credentials.
+- Payloads returned by the wg-easy API now carry an explicit untrusted-data
+  marker and are capped at 60 000 characters, with the truncation notice naming
+  the call that fetches the rest. Client names, DNS entries and endpoints are
+  free-form strings, so they are marked as data rather than instructions.
+  Server-composed messages, including the delete confirmation, stay unmarked.
+- The runtime image no longer contains npm. The entrypoint is plain `node`, and
+  npm's vendored dependency tree was the sole source of the container scan's
+  HIGH/CRITICAL findings.
+- `typescript` 6.0.3, `typescript-eslint` 8.67.0.
+
+### Security
+
+- `WG_EASY_URL` containing embedded credentials (`user:password@host`) is now
+  rejected at startup. They bypassed the environment wipe in `loadConfig`, were
+  prefixed onto every request path and were echoed verbatim in the startup log.
 
 ## [0.2.2] - 2026-08-11
 

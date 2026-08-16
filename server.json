@@ -8,12 +8,12 @@
     "url": "https://github.com/ni-c/wg-easy-mcp",
     "source": "github"
   },
-  "version": "0.2.2",
+  "version": "0.3.0",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "wg-easy-mcp",
-      "version": "0.2.2",
+      "version": "0.3.0",
       "transport": {
         "type": "stdio"
       },
@@ -47,7 +47,7 @@
     },
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/ni-c/wg-easy-mcp:0.2.2",
+      "identifier": "ghcr.io/ni-c/wg-easy-mcp:0.3.0",
       "transport": {
         "type": "stdio"
       },
