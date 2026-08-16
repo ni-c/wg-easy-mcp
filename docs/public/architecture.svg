@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 250" width="760" height="250" role="img" aria-labelledby="arch-title arch-desc">
+  <title id="arch-title">wg-easy-mcp architecture</title>
+  <desc id="arch-desc">An MCP client speaks stdio to wg-easy-mcp, which calls the wg-easy REST API over HTTPS with Basic Authentication; wg-easy configures the WireGuard interface.</desc>
+
+  <!-- SYNC: this file and the inline SVG in docs/index.md show the same diagram.
+       This one is embedded as an image by the README and npm, so it cannot use
+       the site's CSS variables and carries its own prefers-color-scheme block. -->
+  <style>
+    .bg { fill: #ffffff; }
+    .node { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1.25; }
+    .node-accent { fill: rgba(99, 102, 241, 0.12); stroke: #4f46e5; stroke-width: 1.5; }
+    .edge { stroke: #cbd5e1; stroke-width: 1.5; fill: none; }
+    .edge-accent { stroke: #4f46e5; stroke-width: 1.75; fill: none; }
+    .edge-dashed { stroke-dasharray: 5 4; }
+    marker path { fill: #cbd5e1; stroke: none; }
+    marker.accent path { fill: #4f46e5; }
+    text { fill: #1e293b; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 13px; }
+    .label-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+    .label-muted { fill: #64748b; font-size: 11.5px; }
+    .label-title { font-size: 13.5px; font-weight: 600; }
+
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #0f172a; }
+      .node { fill: rgba(148, 163, 184, 0.08); stroke: #64748b; }
+      .node-accent { fill: rgba(129, 140, 248, 0.14); stroke: #a5b4fc; }
+      .edge { stroke: #475569; }
+      .edge-accent { stroke: #a5b4fc; }
+      marker path { fill: #475569; }
+      marker.accent path { fill: #a5b4fc; }
+      text { fill: #e2e8f0; }
+      .label-muted { fill: #94a3b8; }
+    }
+  </style>
+
+  <defs>
+    <marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" />
+    </marker>
+    <marker id="arrow-accent" class="accent" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" />
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="760" height="250" />
+
+  <rect class="node" x="14" y="62" width="164" height="80" rx="10" />
+  <text class="label-title" x="96" y="93" text-anchor="middle">MCP client</text>
+  <text class="label-muted" x="96" y="113" text-anchor="middle">Claude, Codex, Inspector</text>
+
+  <rect class="node-accent" x="248" y="62" width="180" height="80" rx="10" />
+  <text class="label-title" x="338" y="93" text-anchor="middle">wg-easy-mcp</text>
+  <text class="label-muted" x="338" y="113" text-anchor="middle">10 tools, zod-validated</text>
+
+  <rect class="node" x="498" y="62" width="164" height="80" rx="10" />
+  <text class="label-title" x="580" y="93" text-anchor="middle">wg-easy v15</text>
+  <text class="label-muted" x="580" y="113" text-anchor="middle">REST API :51821</text>
+
+  <rect class="node" x="498" y="178" width="164" height="54" rx="10" />
+  <text class="label-title" x="580" y="203" text-anchor="middle">WireGuard</text>
+  <text class="label-muted" x="580" y="221" text-anchor="middle">wg0 interface</text>
+
+  <path class="edge-accent" d="M178,102 L242,102" marker-end="url(#arrow-accent)" />
+  <text class="label-mono" x="210" y="90" text-anchor="middle">stdio</text>
+
+  <path class="edge-accent" d="M428,102 L492,102" marker-end="url(#arrow-accent)" />
+  <text class="label-mono" x="460" y="90" text-anchor="middle">HTTPS</text>
+  <text class="label-muted" x="460" y="126" text-anchor="middle">Basic Auth</text>
+
+  <path class="edge edge-dashed" d="M580,142 L580,172" marker-end="url(#arrow)" />
+
+  <text class="label-muted" x="338" y="164" text-anchor="middle">confirm tokens · redaction · response budget</text>
+</svg>
