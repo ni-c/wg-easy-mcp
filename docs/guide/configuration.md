@@ -55,7 +55,7 @@ this unset.
 ## Starting without credentials
 
 If any of the three required variables is missing, the server **still starts**.
-It completes the MCP handshake, lists all ten tools, and fails every actual call
+It completes the MCP handshake, lists all eleven tools, and fails every actual call
 with the same setup instructions it printed on stderr.
 
 That is deliberate: registries and sandbox inspectors start the server with no

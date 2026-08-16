@@ -28,7 +28,7 @@ give the wg-easy container egress.
 
 ## Can I make it read-only?
 
-Not today. wg-easy has no read-only account, and this server registers all ten
+Not today. wg-easy has no read-only account, and this server registers all eleven
 tools unconditionally. What you can do:
 
 - use an MCP client that asks before running non-read-only tools — the tools

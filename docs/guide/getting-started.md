@@ -46,7 +46,7 @@ For Claude Desktop, Codex, a container or a source checkout, see
 
 ## 3. Verify it works
 
-Ask your client to list the tools; you should see ten. Then try a read-only
+Ask your client to list the tools; you should see eleven. Then try a read-only
 call — `list_clients` is the safe one to start with:
 
 > List my WireGuard clients with their status.

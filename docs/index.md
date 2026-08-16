@@ -15,7 +15,7 @@ hero:
       text: GitHub
       link: https://github.com/ni-c/wg-easy-mcp
 features:
-  - title: Ten tools, one API
+  - title: Eleven tools, one API
     details: Full client lifecycle over the wg-easy v15 REST API — including .conf files, QR codes and one-time download links — with partial updates that merge into the current client state instead of overwriting it.
   - title: Runs anywhere stdio does
     details: A single npx command, a Claude Desktop JSON block, a Codex TOML entry or a multi-arch container image with an SBOM and build provenance.
