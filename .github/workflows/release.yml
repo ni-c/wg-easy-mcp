@@ -60,7 +60,7 @@ jobs:
       - name: Wait for the GHCR image tag
         run: |
           version="$(node -p "require('./package.json').version")"
-          for i in $(seq 1 15); do
+          for i in $(seq 1 60); do
             token="$(curl -s "https://ghcr.io/token?scope=repository:ni-c/wg-easy-mcp:pull&service=ghcr.io" | jq -r .token)"
             if curl -sf -o /dev/null -H "Authorization: Bearer $token" \
                  -H 'Accept: application/vnd.oci.image.index.v1+json' \
@@ -68,8 +68,8 @@ jobs:
               echo "ghcr.io/ni-c/wg-easy-mcp:$version is available"
               exit 0
             fi
-            echo "waiting for ghcr.io/ni-c/wg-easy-mcp:$version ($i/15)"
-            sleep 20
+            echo "waiting for ghcr.io/ni-c/wg-easy-mcp:$version ($i/60)"
+            sleep 30
           done
           echo "Timed out. If the CI publish job succeeded, check that the GHCR" >&2
           echo "package visibility is public — it does not inherit from the repo." >&2
