@@ -14,10 +14,15 @@ Lets MCP clients like Claude Code, Claude Desktop or Codex manage your WireGuard
 
 **📖 Full documentation: [wg-easy-mcp.ni-c.de](https://wg-easy-mcp.ni-c.de)**
 
-<!-- SYNC: rendered from docs/public/architecture.svg, which carries its own
-     prefers-color-scheme block. The inline twin lives in docs/index.md. -->
-
-![Architecture: an MCP client speaks stdio to wg-easy-mcp, which calls the wg-easy v15 REST API over HTTPS with Basic Authentication](https://wg-easy-mcp.ni-c.de/architecture.svg)
+<!-- <picture> is resolved against the colour scheme of the page showing it, so GitHub
+     picks the variant that matches its own theme toggle. npm strips <picture> and
+     <source> when it sanitises the README and keeps the <img>, which is why that
+     fallback brings its own dark card instead of relying on a media query. -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://wg-easy-mcp.ni-c.de/architecture-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="https://wg-easy-mcp.ni-c.de/architecture-light.svg">
+  <img src="https://wg-easy-mcp.ni-c.de/architecture.svg" alt="An MCP client speaks stdio to wg-easy-mcp, which calls the wg-easy v15 REST API over HTTPS with Basic Authentication" width="800">
+</picture>
 
 ## Requirements
 
