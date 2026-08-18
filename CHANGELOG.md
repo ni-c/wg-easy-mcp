@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.1] - 2026-08-18
 
 ### Fixed
 
@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fails if one of them is edited by hand.
 - `docs/public/og.png` is generated at exactly 1280x640, GitHub's recommended size
   for a social preview, instead of being drawn by hand.
+- The TypeScript major is now parked in `.github/dependabot.yml` with its reason,
+  instead of living only as an `@dependabot ignore` on the closed PR #5 — that
+  state is invisible to anyone reading the config and is lost if the PR is reopened.
 
 ## [0.3.0] - 2026-08-16
 
