@@ -44,6 +44,27 @@ describe('loadConfig', () => {
     expect(environment.WG_EASY_PASSWORD).toBeUndefined();
   });
 
+  it('removes the credentials even when the URL is missing', () => {
+    // Regression: with the deletion at the end of loadConfig, the early return
+    // for a missing URL skipped it, so username and password stayed in
+    // process.env for the whole process lifetime — readable in
+    // /proc/<pid>/environ and inherited by every child process. A missing URL
+    // with credentials present is a plausible misconfiguration, and it is
+    // exactly the state in which someone reaches for an inspector.
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const environment: NodeJS.ProcessEnv = {
+      WG_EASY_USERNAME: 'admin',
+      WG_EASY_PASSWORD: 'secret',
+    };
+    const config = loadConfig(environment);
+    expect(environment.WG_EASY_USERNAME).toBeUndefined();
+    expect(environment.WG_EASY_PASSWORD).toBeUndefined();
+    // Still handed to the caller — the server starts, it just cannot call out.
+    expect(config.username).toBe('admin');
+    expect(config.password).toBe('secret');
+    expect(config.url).toBeUndefined();
+  });
+
   it('warns but does not exit when required variables are missing', () => {
     // Registries and inspectors start the server without credentials and
     // expect the MCP handshake to succeed.
@@ -71,6 +92,20 @@ describe('loadConfig', () => {
       'process.exit'
     );
     expect(exit).toHaveBeenCalledWith(1);
+  });
+
+  it('does not echo the offending value of an invalid URL', () => {
+    // Regression: this branch fires precisely when the variable does not hold a
+    // URL — most often because a password was pasted into the wrong one. The
+    // message used to quote the value, putting it in the MCP host's log.
+    mockExit();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(() =>
+      loadConfig(env({ WG_EASY_URL: 'wg_password_in_the_wrong_variable' }))
+    ).toThrow('process.exit');
+    const output = error.mock.calls.flat().join(' ');
+    expect(output).toMatch(/is not a valid URL/);
+    expect(output).not.toContain('wg_password_in_the_wrong_variable');
   });
 
   it('exits on a non-http(s) URL scheme', () => {
@@ -115,6 +150,9 @@ describe('loadConfig', () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     loadConfig(env({ WG_EASY_URL: 'http://localhost:51821' }));
     loadConfig(env({ WG_EASY_URL: 'http://127.0.0.1:51821' }));
+    // Regression: URL.hostname returns "[::1]" with the brackets, so comparing
+    // against a bare "::1" never matched and this warned about a loopback URL.
+    loadConfig(env({ WG_EASY_URL: 'http://[::1]:51821' }));
     expect(error).not.toHaveBeenCalled();
   });
 });

@@ -43,6 +43,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const password = env.WG_EASY_PASSWORD;
   const insecureTls = env.WG_EASY_INSECURE_TLS === 'true';
 
+  // Don't keep the credentials in the environment for the process lifetime — they
+  // are visible to child processes and in /proc/<pid>/environ. This happens before
+  // any branch on purpose: the paths below either exit or return early, and "the
+  // URL is missing or malformed" is exactly the state in which someone runs an
+  // inspector or trips a crash reporter, so it is the last moment they should
+  // still be sitting in the environment. Everything after this point reads the
+  // locals above, never `env` again.
+  delete env.WG_EASY_USERNAME;
+  delete env.WG_EASY_PASSWORD;
+
   const missing = [
     !url && 'WG_EASY_URL',
     !username && 'WG_EASY_USERNAME',
@@ -61,7 +71,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   try {
     parsed = new URL(url);
   } catch {
-    console.error(`wg-easy-mcp: WG_EASY_URL is not a valid URL: ${url}`);
+    // The value itself is not echoed: this branch fires precisely when the
+    // variable does not hold what was expected, and a password pasted into the
+    // wrong environment variable would otherwise be printed verbatim into the
+    // MCP host's log.
+    console.error(
+      'wg-easy-mcp: WG_EASY_URL is not a valid URL (e.g. https://vpn.example.com)'
+    );
     process.exit(1);
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
@@ -88,26 +104,23 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     );
   }
 
-  const config: Config = {
+  return {
     url: url.replace(/\/+$/, ''),
     username,
     password,
     insecureTls,
   };
-
-  // Don't keep the credentials in the environment for the process lifetime
-  // (visible to child processes and in /proc/<pid>/environ).
-  delete env.WG_EASY_USERNAME;
-  delete env.WG_EASY_PASSWORD;
-
-  return config;
 }
 
 function isLoopbackHost(hostname: string): boolean {
+  // URL.hostname keeps the brackets around an IPv6 literal, so comparing against
+  // a bare '::1' never matches and the plain-http warning fires on a loopback
+  // URL written as http://[::1]:51821.
+  const host = hostname.replace(/^\[|\]$/g, '');
   return (
-    hostname === 'localhost' ||
-    hostname.endsWith('.localhost') ||
-    hostname.startsWith('127.') ||
-    hostname === '::1'
+    host === 'localhost' ||
+    host.endsWith('.localhost') ||
+    host.startsWith('127.') ||
+    host === '::1'
   );
 }

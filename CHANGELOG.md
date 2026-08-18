@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- #region changelog -->
 
+## [0.3.2] - 2026-08-18
+
+### Fixed
+
+- The Basic Auth username and password are no longer left in the environment
+  when `WG_EASY_URL` is unset. `loadConfig` deleted them only at the very end,
+  behind the early return for a missing URL, so in that state they stayed in
+  `process.env` for the whole process lifetime — readable in
+  `/proc/<pid>/environ` and inherited by every child process. The deletion now
+  happens before any branch.
+- A malformed `WG_EASY_URL` is no longer echoed into the log. That branch fires
+  precisely when the variable does not hold a URL, which most often means a
+  credential was pasted into the wrong variable.
+- `http://[::1]:…` no longer produces the "plain http to a non-local host"
+  warning. `URL.hostname` keeps the brackets around an IPv6 literal, so the
+  loopback check never matched that notation.
+
 ## [0.3.1] - 2026-08-18
 
 ### Fixed
