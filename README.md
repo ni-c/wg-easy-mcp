@@ -7,6 +7,7 @@
 [![license](https://img.shields.io/npm/l/wg-easy-mcp)](LICENSE)
 [![container](https://img.shields.io/badge/ghcr.io-ni--c%2Fwg--easy--mcp-2496ed?logo=docker&logoColor=white)](https://github.com/ni-c/wg-easy-mcp/pkgs/container/wg-easy-mcp)
 [![docs](https://img.shields.io/badge/docs-wg--easy--mcp.ni--c.de-4f46e5)](https://wg-easy-mcp.ni-c.de)
+[![sponsor](https://img.shields.io/badge/sponsor-ni--c-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/ni-c)
 
 A [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server for administering [wg-easy](https://github.com/wg-easy/wg-easy) (WireGuard Easy) instances.
 

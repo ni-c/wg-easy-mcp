@@ -20,6 +20,7 @@
     "url": "https://github.com/ni-c/wg-easy-mcp/issues"
   },
   "homepage": "https://github.com/ni-c/wg-easy-mcp#readme",
+  "funding": "https://github.com/sponsors/ni-c",
   "type": "module",
   "bin": {
     "wg-easy-mcp": "dist/index.js"
