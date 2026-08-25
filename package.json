@@ -1,6 +1,6 @@
 {
   "name": "wg-easy-mcp",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "mcpName": "io.github.ni-c/wg-easy-mcp",
   "description": "Model Context Protocol (MCP) server for administering wg-easy (WireGuard Easy) v15+ instances",
   "keywords": [

@@ -1,3 +1,5 @@
+import { internalHostKind } from './hosts.js';
+
 export interface Config {
   /**
    * Base URL of the wg-easy instance, e.g. `https://vpn.example.com:51821`.
@@ -113,14 +115,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 }
 
 function isLoopbackHost(hostname: string): boolean {
-  // URL.hostname keeps the brackets around an IPv6 literal, so comparing against
-  // a bare '::1' never matches and the plain-http warning fires on a loopback
-  // URL written as http://[::1]:51821.
-  const host = hostname.replace(/^\[|\]$/g, '');
-  return (
-    host === 'localhost' ||
-    host.endsWith('.localhost') ||
-    host.startsWith('127.') ||
-    host === '::1'
-  );
+  // The shared classifier, so every spelling of a loopback address is
+  // recognised — including http://[::ffff:127.0.0.1] and 'localhost.' with its
+  // root label, which the string comparison this replaced did not see.
+  return internalHostKind(hostname) === 'loopback';
 }
