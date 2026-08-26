@@ -33,3 +33,28 @@ stdout carries the protocol.
   once the configuration has been read.
 - The wg-easy connection uses a 15-second request timeout and refuses to follow
   redirects.
+
+## Narrowing the tool list
+
+| Variable              | Required | Description                                                       |
+| --------------------- | -------- | ----------------------------------------------------------------- |
+| `WG_EASY_ALLOW_TOOLS` | no       | Tool names, `list_*` prefixes or `essential`; only these register |
+| `WG_EASY_DENY_TOOLS`  | no       | Same syntax; subtracted from whatever the allow list left         |
+
+Both are comma-separated. Each entry is either an exact tool name or a prefix with
+a single trailing `*`. Entries are trimmed and matched case-insensitively; empty
+entries are ignored, and a value that is empty or only whitespace counts as unset —
+`WG_EASY_ALLOW_TOOLS=` in a compose file does not mean "allow nothing".
+`essential` is recognised only in the allow list, and selects `get_server_info`, `list_clients`, `get_client`, `create_client`, `get_client_config`, `get_client_qrcode`, `enable_client`, `disable_client`.
+
+**An entry that matches no tool aborts startup**, naming the entry and listing the
+valid names, as does a malformed pattern such as `*_x` or `list_*_x`. The
+alternative — ignoring the entry — leaves a tool missing from `tools/list` with
+nothing pointing at the cause. If both lists together remove everything, the server
+refuses to start rather than offering an empty tool list.
+
+Under `WG_EASY_READ_ONLY`, an exact write-tool name in the allow list is an
+error naming the read-only setting rather than "unknown tool"; a pattern covering
+write tools is accepted and merely contributes nothing, with a warning on stderr.
+Deny entries are exempt: denying an already-suppressed tool is how a defensive
+list is written.

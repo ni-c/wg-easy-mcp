@@ -19,6 +19,8 @@ features:
     details: Full client lifecycle over the wg-easy v15 REST API — including .conf files, QR codes and one-time download links — with partial updates that merge into the current client state instead of overwriting it.
   - title: Runs anywhere stdio does
     details: A single npx command, a Claude Desktop JSON block, a Codex TOML entry or a multi-arch container image with an SBOM and build provenance.
+  - title: A context-sized subset
+    details: 'WG_EASY_READ_ONLY=true registers the read tools and nothing else. WG_EASY_ALLOW_TOOLS cuts finer — essential for a curated eight, your own comma-separated list, or a whole family with list_* — and WG_EASY_DENY_TOOLS subtracts. Whatever is filtered out does not exist on the protocol rather than failing when called, and a name that matches no tool stops the server at startup instead of quietly going missing.'
   - title: Safe by default
     details: Deleting a client needs a server-issued confirmation token, admin secrets are redacted, upstream content is marked untrusted, and relaxed TLS is scoped to one connection instead of the whole process.
 ---

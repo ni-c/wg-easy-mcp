@@ -29,6 +29,9 @@ describe('loadConfig', () => {
       username: 'admin',
       password: 'secret',
       insecureTls: false,
+      readOnly: false,
+      allowTools: undefined,
+      denyTools: undefined,
     });
   });
 
@@ -78,6 +81,9 @@ describe('loadConfig', () => {
       username: undefined,
       password: undefined,
       insecureTls: false,
+      readOnly: false,
+      allowTools: undefined,
+      denyTools: undefined,
     });
     expect(exit).not.toHaveBeenCalled();
     expect(error.mock.calls[0]?.[0]).toContain(

@@ -80,3 +80,20 @@ questions and ideas; [Issues](https://github.com/ni-c/wg-easy-mcp/issues) for
 reproducible problems; and
 [private reporting](https://github.com/ni-c/wg-easy-mcp/security/advisories/new)
 for anything security-related.
+
+## One tool I expected is missing
+
+Something narrowed the list. In order of likelihood:
+
+- `WG_EASY_READ_ONLY` is set, and it is a write tool.
+- `WG_EASY_ALLOW_TOOLS` is set and does not name it — it is an allow list, so
+  anything not named is out.
+- `WG_EASY_DENY_TOOLS` names it, possibly through a prefix such as `list_*`.
+
+A filtered tool is not registered at all, so it is missing from `tools/list` and
+answers `tools/call` with "tool not found". There is no state where it is hidden
+but still callable.
+
+What it is _not_ is a typo in one of those variables: an entry that matches no
+tool stops the server at startup and says which entry it was. See
+[choosing the tools that load](/guide/configuration#choosing-the-tools-that-load).

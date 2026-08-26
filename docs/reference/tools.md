@@ -1,5 +1,10 @@
 # Tools
 
+All eleven are registered unless you say otherwise. `WG_EASY_ALLOW_TOOLS` and
+`WG_EASY_DENY_TOOLS` narrow the list to the ones you want, and `essential` selects a
+curated eight — see
+[choosing the tools that load](/guide/configuration#choosing-the-tools-that-load).
+
 Eleven tools, all against the wg-easy v15 REST API. Every payload that comes back
 from wg-easy carries the untrusted-data marker and the 60 000-character budget
 described in [Security](/guide/security).
