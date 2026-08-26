@@ -10,7 +10,17 @@ export interface Config {
   url: string | undefined;
   username: string | undefined;
   password: string | undefined;
-  insecureTls: boolean;
+  insecureTls: boolean; /** When true, only the read-only tools are registered at all. */
+  readOnly: boolean;
+  /**
+   * Raw value of `WG_EASY_ALLOW_TOOLS` — comma-separated tool names, `list_*`
+   * prefixes, or `essential`. Kept unparsed on purpose: this file is a mirror of
+   * the environment, and the names can only be checked against the tool
+   * catalogue, which `buildToolFilter` does.
+   */
+  allowTools: string | undefined;
+  /** Raw value of `WG_EASY_DENY_TOOLS`, same shape, subtracted from the above. */
+  denyTools: string | undefined;
 }
 
 /** Shown when credentials are missing — on startup and on every API call. */
@@ -44,6 +54,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const username = env.WG_EASY_USERNAME;
   const password = env.WG_EASY_PASSWORD;
   const insecureTls = env.WG_EASY_INSECURE_TLS === 'true';
+  const readOnly = env.WG_EASY_READ_ONLY === 'true';
+  const allowTools = env.WG_EASY_ALLOW_TOOLS;
+  const denyTools = env.WG_EASY_DENY_TOOLS;
 
   // Don't keep the credentials in the environment for the process lifetime — they
   // are visible to child processes and in /proc/<pid>/environ. This happens before
@@ -66,7 +79,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   }
 
   if (!url) {
-    return { url: undefined, username, password, insecureTls };
+    return {
+      url: undefined,
+      username,
+      password,
+      insecureTls,
+      readOnly,
+      allowTools,
+      denyTools,
+    };
   }
 
   let parsed: URL;
@@ -111,6 +132,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     username,
     password,
     insecureTls,
+    readOnly,
+    allowTools,
+    denyTools,
   };
 }
 

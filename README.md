@@ -13,6 +13,11 @@ A [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server for adm
 
 Lets MCP clients like Claude Code, Claude Desktop or Codex manage your WireGuard VPN: list, create, update, enable/disable and delete clients, fetch configuration files and QR codes, and inspect the server status — all through the wg-easy v15 REST API.
 
+Eleven tools is the ceiling, not the floor: `WG_EASY_ALLOW_TOOLS=essential`
+registers a curated eight instead, and a model picks the right tool far more
+reliably from eight than from eleven — see
+[choosing which tools load](#choosing-which-tools-load).
+
 <!-- <picture> is resolved against the colour scheme of the page showing it, so GitHub
      picks the variant that matches its own theme toggle. npm strips <picture> and
      <source> when it sanitises the README and keeps the <img>, which is why that
@@ -41,6 +46,8 @@ Configuration is provided via environment variables:
 | `WG_EASY_USERNAME`     | yes      | Username of a wg-easy admin account                                                     |
 | `WG_EASY_PASSWORD`     | yes      | Password of that account                                                                |
 | `WG_EASY_INSECURE_TLS` | no       | Set to `true` to accept self-signed TLS certificates (scoped to the wg-easy connection) |
+| `WG_EASY_ALLOW_TOOLS`  | no       | Comma-separated tool names, `list_*` prefixes, or `essential` for a curated preset      |
+| `WG_EASY_DENY_TOOLS`   | no       | Same syntax; removed from whatever `WG_EASY_ALLOW_TOOLS` left                           |
 
 > **Use `https://`.** With a plain-`http` URL the Basic Auth credentials and all
 > WireGuard private keys travel unencrypted; the server prints a warning unless
@@ -50,6 +57,28 @@ Configuration is provided via environment variables:
 Without credentials the server still starts and lists its tools (so registries
 and inspectors can introspect it), but every tool call fails with setup
 instructions instead of reaching the wg-easy API.
+
+### Choosing which tools load
+
+`WG_EASY_ALLOW_TOOLS` and `WG_EASY_DENY_TOOLS` take comma-separated tool names;
+a trailing `*` matches a whole family. `essential` is a curated preset of
+eight: `get_server_info`, `list_clients`, `get_client`, `create_client`, `get_client_config`, `get_client_qrcode`, `enable_client`, `disable_client`.
+
+```sh
+WG_EASY_ALLOW_TOOLS=essential
+WG_EASY_ALLOW_TOOLS=list_clients,get_client_config
+WG_EASY_DENY_TOOLS=delete_client,create_client
+```
+
+An entry that matches no tool aborts startup and names it, so a typo cannot
+silently hide a tool — an absent tool is not something anyone traces back to an
+environment variable. A filtered tool is never registered, so it is absent from
+`tools/list` and unknown to `tools/call` alike, exactly like a write tool under
+`WG_EASY_READ_ONLY`.
+
+If you run several of these servers at once, [mcp-hub](https://mcp-hub.ni-c.de)
+is the other answer — its `/hub` endpoint replaces every server's tools with six
+meta-tools.
 
 ## Installation
 
