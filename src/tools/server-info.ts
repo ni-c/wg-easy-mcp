@@ -1,4 +1,5 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
+import { z } from 'zod';
 
 import type { WgEasyApi } from '../api.js';
 import { run, upstreamJsonResult } from '../result.js';
@@ -45,7 +46,7 @@ export function registerServerInfoTools(
       title: 'Get wg-easy server info',
       description:
         'Get information about the wg-easy instance: release/update status, general settings and the WireGuard interface configuration. Secret fields (private keys, passwords) are redacted.',
-      inputSchema: {},
+      inputSchema: z.object({}),
       annotations: { readOnlyHint: true },
     },
     () =>
