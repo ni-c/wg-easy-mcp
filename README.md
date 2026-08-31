@@ -209,7 +209,7 @@ The full trust model is in [SECURITY.md](SECURITY.md) and, in prose, at [wg-easy
 npm install
 npm run build     # compile TypeScript to dist/
 npm test          # run the vitest test suite
-npm run lint      # eslint + prettier check
+npm run lint      # oxlint + prettier check
 npm run test:coverage
 ```
 

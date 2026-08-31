@@ -26,14 +26,14 @@ WG_EASY_USERNAME=admin WG_EASY_PASSWORD=... node dist/index.js
 ## Expectations
 
 - **Tests.** Behaviour changes come with a test that fails without the change.
-  CI runs on Node 22 and 24, plus eslint, prettier, `npm audit`, CodeQL and a Trivy scan of the container image.
+  CI runs on Node 22 and 24, plus oxlint, prettier, `npm audit`, CodeQL and a Trivy scan of the container image.
 - **Comments** explain constraints the code cannot show — not what the next line does.
 - **Security-sensitive areas** (config parsing, confirmation tokens, anything that
   builds a request URL): please describe the attack you are defending against, or the
   one your change might open, in the PR text.
 - **No new runtime dependencies** without a very good reason; the small tree is a
   feature.
-- Run `npm run lint` before pushing — it checks both eslint and prettier, and prettier
+- Run `npm run lint` before pushing — it checks both oxlint and prettier, and prettier
   also validates the YAML, JSON and Markdown files.
 
 ## Questions and bugs
