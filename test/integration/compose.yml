@@ -1,0 +1,53 @@
+# Throwaway wg-easy for `npm run test:integration`.
+#
+# Not a managed stack: brought up, filled by test/integration/bootstrap.ts, and
+# destroyed with `down -v` afterwards. The suite calls every tool in the
+# catalogue, deletes included, so nothing here may be a VPN anybody uses.
+#
+# Bound to 127.0.0.1 only, and that is more than tidiness here: wg-easy's web
+# interface is the whole administrative surface of a VPN.
+services:
+  wg-easy:
+    # Overridable so the weekly CI run can point at a newer tag and report
+    # drift without changing what the PR gate tests.
+    image: ${WG_EASY_IMAGE:-ghcr.io/wg-easy/wg-easy:15.4.0}
+    # wg-quick's rules are written with `iptables`, and the image's default
+    # alternative is **iptables-legacy**, which needs the `ip_tables` kernel
+    # module. A host that is nftables-only does not have it, and the failure is
+    # remote from the cause: the container starts, serves HTTP, and every
+    # client call answers 500 because `wg show wg0 dump` finds no interface.
+    #
+    # `iptables-nft` programs nf_tables and works on both kinds of host, so
+    # selecting it is not a workaround for one workstation — it is the more
+    # portable default for a throwaway container. The alternatives symlinks are
+    # rewritten directly because `update-alternatives --set` refuses: the nft
+    # variants are not *registered* as alternatives in this image, only shipped.
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - |
+        ln -sf /usr/sbin/iptables-nft /etc/alternatives/iptables
+        ln -sf /usr/sbin/ip6tables-nft /etc/alternatives/ip6tables
+        ln -sf /usr/sbin/iptables-nft-restore /etc/alternatives/iptables-restore
+        ln -sf /usr/sbin/ip6tables-nft-restore /etc/alternatives/ip6tables-restore
+        ln -sf /usr/sbin/iptables-nft-save /etc/alternatives/iptables-save
+        ln -sf /usr/sbin/ip6tables-nft-save /etc/alternatives/ip6tables-save
+        exec docker-entrypoint.sh /usr/bin/dumb-init node server/index.mjs
+    environment:
+      # No password here: wg-easy 15 has a **setup wizard** and no way to skip
+      # it — the admin account is created through the API, which is what
+      # bootstrap.ts does.
+      INIT_ENABLED: 'false'
+    cap_add:
+      # Both are required, and the failure without them is not a permission
+      # error: the container starts, answers HTTP, and every WireGuard
+      # operation fails somewhere far from the cause.
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv4.conf.all.src_valid_mark=1
+    tmpfs:
+      # The configuration database lives for the length of one run.
+      - /etc/wireguard
+    ports:
+      - '127.0.0.1:51821:51821/tcp'
