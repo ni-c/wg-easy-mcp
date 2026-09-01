@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- #region changelog -->
 
+## [Unreleased]
+
+### Changed
+
+- Runs on **MCP SDK 2.0**. The wire protocol is unchanged for existing clients:
+  the server negotiates the same revision it always did, and a client that
+  worked before works now. What changed is the package layout behind it —
+  `@modelcontextprotocol/sdk` split into `core`, `server` and `client`, and the
+  deprecated Authorization Server helpers are not installed at all.
+- The linter is **oxlint** instead of eslint plus typescript-eslint, which lifts
+  the TypeScript ceiling: typescript-eslint pins `typescript` below 6.1, so this
+  repository was held on TypeScript 6 by its linter rather than by its code.
+  It is on TypeScript 7 now. Neither is visible to anyone running the server.
+- The tool filter, the host classifier and the documentation-asset generator now
+  come from **`mcp-tool-allowlist`**, **`mcp-internal-hosts`** and
+  **`svg-asset-set`** rather than from copies kept in this repository — 719
+  fewer lines here, and one place to fix each of them. All three have no runtime
+  dependencies of their own.
+
+### Fixed
+
+- An entry in `WG_EASY_ALLOW_TOOLS` that is not tool-name-shaped is now
+  **redacted** in the error rather than quoted back. `WG_EASY_PASSWORD` and
+  `WG_EASY_ALLOW_TOOLS` are adjacent lines in every compose file, and a paste
+  into the wrong one used to print the credential into the client's log.
+
 ## [0.4.0] - 2026-08-27
 
 ### Added
