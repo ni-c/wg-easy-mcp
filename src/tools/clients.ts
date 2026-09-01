@@ -111,7 +111,14 @@ export function registerClientTools(
     'get_client',
     {
       title: 'Get WireGuard client',
-      description: 'Get the full details of a single WireGuard client.',
+      description:
+        'Get the full details of a single WireGuard client.\n\n' +
+        'The private key and pre-shared key are redacted. They are not missing ' +
+        'from the instance — wg-easy returns them here in full, and this ' +
+        'server removes them, because a key in the conversation is a key in ' +
+        'the transcript. Use get_client_config or get_client_qrcode when the ' +
+        'key is genuinely wanted: handing a peer its configuration is what ' +
+        'those two are for.',
       inputSchema: z.object({ clientId }),
       annotations: READ_ONLY,
     },
@@ -463,7 +470,18 @@ export function registerClientTools(
     {
       title: 'Generate one-time config link',
       description:
-        'Generate a one-time download link for a client configuration that can be shared with the end user. Requires WG_ENABLE_ONE_TIME_LINKS to be enabled on the wg-easy instance. SENSITIVE: anyone with the link can download the full client configuration without authentication — share it only with the intended user. Asks a person first; where the client cannot show a dialog, call once to receive a token and again with it.',
+        'Generate a one-time download link for a client configuration that can ' +
+        'be shared with the end user. Requires WG_ENABLE_ONE_TIME_LINKS to be ' +
+        'enabled on the wg-easy instance. SENSITIVE: anyone with the link can ' +
+        'download the full client configuration without authentication — share ' +
+        'it only with the intended user. Asks a person first; where the client ' +
+        'cannot show a dialog, call once to receive a token and again with ' +
+        'it.\n\n' +
+        'On wg-easy 15.4.0 the upstream endpoint answers HTTP 500 and no link ' +
+        'is produced. This tool reports that rather than inventing one, so a ' +
+        'result saying the link value was not returned is wg-easy failing, not ' +
+        'a bad argument — nothing to retry differently. Send the configuration ' +
+        'itself with get_client_config instead.',
       inputSchema: z.object({ clientId, confirm_token: confirmToken }),
       annotations: {
         // Destroys nothing, and that is the whole difficulty with this one: it
