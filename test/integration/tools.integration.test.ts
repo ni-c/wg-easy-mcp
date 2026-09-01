@@ -47,6 +47,7 @@ interface Client {
   id: number;
   name: string;
   enabled: boolean;
+  publicKey?: string;
 }
 
 beforeAll(async () => {
@@ -83,23 +84,28 @@ describe('a client through its whole life', () => {
   it('creates one, which generates a real key pair', async () => {
     await asking.call('create_client', { name: 'integration-laptop' });
 
-    const listed = parse<Client[]>(await asking.call('list_clients'));
+    const listed = parse<(Client & { privateKey?: string })[]>(
+      await asking.call('list_clients')
+    );
     expect(listed).toHaveLength(1);
     clientId = listed[0]!.id;
     expect(listed[0]!.name).toBe('integration-laptop');
+    // The list endpoint does not carry the private key at all — only the
+    // single-client read does, which is what made the leak easy to miss.
+    expect(listed[0]!.privateKey).toBeUndefined();
+    expect(listed[0]!.publicKey).toBeDefined();
 
     const one = parse<Client & { privateKey?: string }>(
       await asking.call('get_client', { clientId })
     );
     expect(one.name).toBe('integration-laptop');
 
-    // **A finding, pinned as it is rather than endorsed.** `get_server_info`
-    // redacts private keys; `get_client` and `list_clients` do not, so the
-    // client's WireGuard private key comes back in full and lands in the
-    // model's context — and therefore in the transcript. `get_client_config`
-    // already exists for the case where somebody genuinely wants the key.
-    // If this is ever redacted, this assertion is what should fail.
-    expect(one.privateKey).toMatch(/^[A-Za-z0-9+/]{42,}=$/);
+    // Found by this suite and fixed: wg-easy returns each client's own
+    // private key and pre-shared key in full, and only `get_server_info` used
+    // to redact. The key now never leaves the process — `get_client_config`
+    // exists for the case where somebody genuinely wants it, deliberately and
+    // on request.
+    expect(one.privateKey).toBe('[redacted]');
   });
 
   it('hands out a configuration generated from that key pair', async () => {

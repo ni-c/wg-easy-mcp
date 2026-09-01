@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`get_client` no longer returns the client's WireGuard private key.**
+  wg-easy's single-client endpoint carries `privateKey` and `preSharedKey` in
+  full, and only `get_server_info` was filtering — so asking about a VPN client
+  put that client's key into the model's context and therefore into the
+  transcript, where it outlives any decision to stop using it.
+
+  `list_clients` does not carry the key on 15.4.0, which is what made this easy
+  to miss; the filter is applied to both anyway rather than to the one endpoint
+  that happens to need it today. `get_client_config` and `get_client_qrcode`
+  still return keys unredacted, deliberately: handing a peer its configuration
+  is what they are for, and somebody asked.
+
+  Found by the new integration suite, against a real wg-easy.
+
 ### Added
 
 - **A person is asked before four operations, not just told about one.** Where

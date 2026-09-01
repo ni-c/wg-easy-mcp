@@ -207,7 +207,7 @@ exposed):
   nothing more. `ELICITATION=false` takes that fallback deliberately; it never
   removes the guard. See
   [Asking a person](https://wg-easy-mcp.ni-c.de/guide/approval).
-- `get_server_info` redacts secret fields (`privateKey`, `preSharedKey`, `password`, session/TOTP secrets) from the admin API responses.
+- **Key material is redacted everywhere it is not the point.** `privateKey`, `preSharedKey`, `password` and session/TOTP secrets are replaced with `[redacted]` at every nesting level — in `get_server_info`'s admin responses, which carry the WireGuard _server_ key, and in `list_clients` and `get_client`, which carry each client's _own_ key. `get_client_config` and `get_client_qrcode` are the deliberate exceptions: handing a peer its configuration is what they are for, and somebody asked.
 - Everything the wg-easy API returns carries an explicit **untrusted-data marker** and a 60 000-character budget. Client names, DNS entries and endpoints are free-form strings, so they are marked as data to report rather than instructions to follow, and a single oversized field cannot flood the model's context.
 - A `WG_EASY_URL` containing embedded credentials (`user:password@host`) is rejected at startup — they would otherwise be echoed in the startup log and prefixed onto every request.
 - Upstream error bodies are truncated and HTML error pages (reverse proxies) are dropped before being returned to the MCP client.

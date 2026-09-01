@@ -67,16 +67,28 @@ sentence would read as the server vouching for it.
 
 See [Asking a person](/guide/approval).
 
-### Admin secrets are redacted
+### Key material is redacted
 
-`get_server_info` reads wg-easy's admin endpoints, which return the server
-configuration. Keys named `privateKey`, `preSharedKey`, `password`,
-`passwordHash`, `sessionSecret` or anything starting with `totp` are replaced
-with `[redacted]` at every nesting level before the result is returned.
+Everything the wg-easy API hands back is filtered before it is returned. Keys
+named `privateKey`, `preSharedKey`, `password`, `passwordHash`, `sessionSecret`
+or anything starting with `totp` are replaced with `[redacted]` at every nesting
+level.
+
+That covers two different secrets. `get_server_info` reads the admin endpoints,
+which carry the WireGuard **server** private key. `get_client` reads a single
+client, and wg-easy returns that client's **own** private key and pre-shared
+key in full — while `list_clients` does not, which is what made the leak easy
+to miss. Until the integration suite found it, `get_client` passed the key
+straight through. A key that reaches the model is in the transcript, where it
+outlives any decision to stop using it.
+
+The filter is applied to both, rather than to the one endpoint that happens to
+carry the key today.
 
 Note the deliberate asymmetry: `get_client_config` and `get_client_qrcode`
 return private keys **unredacted**, because handing a peer its configuration is
-the point of those tools. Their descriptions say so.
+the point of those tools. Their descriptions say so. The difference is that
+somebody asked for it.
 
 ### Upstream content is marked untrusted
 

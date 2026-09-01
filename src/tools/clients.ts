@@ -5,6 +5,7 @@ import {
   type ConfirmationStore,
 } from 'mcp-approval';
 import { z } from 'zod';
+import { redactSecrets } from '../redact.js';
 import {
   errorResult,
   run,
@@ -100,7 +101,7 @@ export function registerClientTools(
         if (sort) query.set('sort', sort);
         const suffix = query.size > 0 ? `?${query.toString()}` : '';
         return upstreamJsonResult(
-          await api.get(`/api/client${suffix}`),
+          redactSecrets(await api.get(`/api/client${suffix}`)),
           'Narrow the result with the filter argument, or fetch a single client with get_client.'
         );
       })
@@ -117,7 +118,7 @@ export function registerClientTools(
     ({ clientId }) =>
       run(async () =>
         upstreamJsonResult(
-          await api.get(`/api/client/${clientId}`),
+          redactSecrets(await api.get(`/api/client/${clientId}`)),
           'Fetch the configuration file separately with get_client_config.'
         )
       )
@@ -187,7 +188,12 @@ export function registerClientTools(
         if (outcome.decision === 'pending') return outcome.result;
 
         return upstreamJsonResult(
-          await api.post('/api/client', { name, expiresAt: expiresAt ?? null }),
+          redactSecrets(
+            await api.post('/api/client', {
+              name,
+              expiresAt: expiresAt ?? null,
+            })
+          ),
           'Re-read the new client with get_client.'
         );
       })
@@ -309,7 +315,7 @@ export function registerClientTools(
           if (value !== undefined) body[key] = value;
         }
         return upstreamJsonResult(
-          await api.post(`/api/client/${clientId}`, body),
+          redactSecrets(await api.post(`/api/client/${clientId}`, body)),
           'Re-read the client with get_client.'
         );
       })
@@ -332,7 +338,7 @@ export function registerClientTools(
     ({ clientId }) =>
       run(async () =>
         upstreamJsonResult(
-          await api.post(`/api/client/${clientId}/enable`),
+          redactSecrets(await api.post(`/api/client/${clientId}/enable`)),
           'Re-read the client with get_client.'
         )
       )
@@ -357,7 +363,7 @@ export function registerClientTools(
     ({ clientId }) =>
       run(async () =>
         upstreamJsonResult(
-          await api.post(`/api/client/${clientId}/disable`),
+          redactSecrets(await api.post(`/api/client/${clientId}/disable`)),
           'Re-read the client with get_client.'
         )
       )

@@ -772,6 +772,65 @@ describe('get_server_info', () => {
     expect(data.interface).toEqual({ ok: true });
   });
 
+  it('redacts the client key material too, not only the server’s', async () => {
+    // Found by the integration suite. On wg-easy 15.4.0 the **single**-client
+    // read carries `privateKey` and the list does not, which is what made the
+    // leak easy to miss — so the redaction is applied to both rather than to
+    // the one endpoint that happens to need it today. A client's key reaching
+    // the model puts it in the transcript, where it outlives any decision to
+    // stop using it, and `get_client_config` already exists for the case
+    // where somebody genuinely wants it.
+    stubFetch(() =>
+      jsonResponse([
+        {
+          id: 1,
+          name: 'laptop',
+          privateKey: 'client-private-key',
+          publicKey: 'client-public-key',
+          preSharedKey: 'client-psk',
+          enabled: true,
+        },
+      ])
+    );
+    const client = await connect();
+
+    const listed = resultJson(
+      (await client.callTool({
+        name: 'list_clients',
+        arguments: {},
+      })) as CallToolResult
+    ) as unknown as Record<string, unknown>[];
+
+    expect(listed[0]!.privateKey).toBe('[redacted]');
+    expect(listed[0]!.preSharedKey).toBe('[redacted]');
+    // The public key is not a secret and stays: it is how a peer is
+    // identified, and removing it would make the result useless.
+    expect(listed[0]!.publicKey).toBe('client-public-key');
+    expect(listed[0]!.name).toBe('laptop');
+  });
+
+  it('redacts the same fields when one client is fetched', async () => {
+    stubFetch(() =>
+      jsonResponse({
+        id: 1,
+        name: 'laptop',
+        privateKey: 'client-private-key',
+        preSharedKey: 'client-psk',
+      })
+    );
+    const client = await connect();
+
+    const one = resultJson(
+      (await client.callTool({
+        name: 'get_client',
+        arguments: { clientId: 1 },
+      })) as CallToolResult
+    ) as Record<string, unknown>;
+
+    expect(one.privateKey).toBe('[redacted]');
+    expect(one.preSharedKey).toBe('[redacted]');
+  });
+
   it('redacts secret fields from admin responses', async () => {
     stubFetch((url) =>
       url.endsWith('/api/admin/interface')
