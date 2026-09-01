@@ -9,7 +9,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A person is asked before four operations, not just told about one.** Where
+  the MCP client supports elicitation, `create_client`, `update_client`,
+  `delete_client` and `generate_one_time_link` raise a real dialog that the
+  model cannot answer on its behalf. Where it does not, they fall back to the
+  two-call `confirm_token` — and say which of the two happened rather than
+  implying somebody approved.
+
+  The three new ones are not there because they destroy something.
+  `create_client` issues a credential that reaches every network behind the VPN;
+  `update_client` can move an address or widen `serverAllowedIps`;
+  `generate_one_time_link` mints a URL that hands out a private key without
+  authentication. Its own annotation had said "which is why the tool is guarded
+  instead" since 0.3.0, and it was not.
+
+  The `update_client` approval is bound to the **exact edit**, not to the
+  client: approving a rename does not license a later call that widens the
+  routes.
+
 ### Changed
+
+- **BREAKING:** the confirmation parameter of `delete_client` is now
+  `confirm_token`, not `confirmToken`. A caller that passes the old name gets a
+  schema error. The prompt tells a model which argument to send, so it has to
+  name the one the schema declares — and the whole family spells it the same
+  way.
+- Deleting no longer keeps its own token table. It uses **`mcp-approval`**, like
+  the other fourteen servers: same five-minute lifetime, same one-use token,
+  same binding to the exact target — but the dialog comes with it, and the
+  timing comparison and the sealed request state are maintained in one place
+  rather than fourteen.
+- A confirmation prompt now shows the client's **name** on a labelled line under
+  the "supplied by the caller, not by this server" heading. A dialog that says
+  only "Delete client 5?" is not something a person can act on; a name in the
+  server's own sentence would read as the server vouching for it.
+- `ELICITATION` switches the dialog off — `false` sends a client that could have
+  been asked down the two-call-token path instead. For a scheduled job or a test
+  harness, where a dialog is the wrong shape rather than an unwanted one.
+
+  It does **not** remove the guard: there is no setting in which a guarded call
+  goes unannounced. Two deliberate rough edges come with it. The variable is
+  **not prefixed**, so one `export ELICITATION=false` reaches every MCP server in
+  the environment — which is why a server started with it off prints a line
+  saying so, and why the fallback text names the server instead of blaming a
+  client that was working fine. And a value that is neither `true` nor `false`
+  **stops the server**, where `WG_EASY_INSECURE_TLS` beside it fails _off_ on a
+  typo: this is the only variable here that defaults to _on_. It is read after
+  `WG_EASY_USERNAME` and `WG_EASY_PASSWORD` are wiped from the environment, so
+  that exit cannot leave them behind.
+
+- The startup log now also reports `WG_EASY_READ_ONLY`, which it never did, and
+  `missingConfigMessage` names the four optional variables it used to omit.
+- A `docs/guide/approval.md` page.
 
 - Runs on **MCP SDK 2.0**. The wire protocol is unchanged for existing clients:
   the server negotiates the same revision it always did, and a client that

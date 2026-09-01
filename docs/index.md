@@ -22,7 +22,7 @@ features:
   - title: A context-sized subset
     details: 'WG_EASY_READ_ONLY=true registers the read tools and nothing else. WG_EASY_ALLOW_TOOLS cuts finer — essential for a curated eight, your own comma-separated list, or a whole family with list_* — and WG_EASY_DENY_TOOLS subtracts. Whatever is filtered out does not exist on the protocol rather than failing when called, and a name that matches no tool stops the server at startup instead of quietly going missing.'
   - title: Safe by default
-    details: Deleting a client needs a server-issued confirmation token, admin secrets are redacted, upstream content is marked untrusted, and relaxed TLS is scoped to one connection instead of the whole process.
+    details: 'Creating, changing or deleting a client, and issuing a one-time configuration link, ask a person first through MCP elicitation — a dialog the model cannot answer on its behalf, falling back to a token bound to the exact target where the client cannot show one. Admin secrets are redacted, upstream content is marked untrusted, and relaxed TLS is scoped to one connection instead of the whole process.'
 ---
 
 <figure class="diagram">
@@ -65,8 +65,8 @@ features:
 
   <path class="edge edge-dashed" d="M580,142 L580,172" marker-end="url(#arrow)" />
 
-<text class="label-muted" x="338" y="164" text-anchor="middle">confirm tokens · redaction · response budget</text>
+<text class="label-muted" x="338" y="164" text-anchor="middle">asks a person · redaction · response budget</text>
 </svg>
 <!-- ARCHITECTURE:END -->
-<figcaption>The server holds no state beyond short-lived delete confirmation tokens; wg-easy remains the source of truth.</figcaption>
+<figcaption>The server holds no state beyond short-lived approvals; wg-easy remains the source of truth.</figcaption>
 </figure>

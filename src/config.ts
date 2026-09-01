@@ -10,8 +10,17 @@ export interface Config {
   url: string | undefined;
   username: string | undefined;
   password: string | undefined;
-  insecureTls: boolean; /** When true, only the read-only tools are registered at all. */
+  insecureTls: boolean;
+  /** When true, only the read-only tools are registered at all. */
   readOnly: boolean;
+  /**
+   * Whether a client that *can* show a dialog is asked before a guarded tool
+   * acts. `ELICITATION=false` turns the dialog off — the guard stays and falls
+   * back to the two-call token, so there is no setting in which a guarded call
+   * goes unannounced.
+   */
+  elicitation: boolean;
+
   /**
    * Raw value of `WG_EASY_ALLOW_TOOLS` — comma-separated tool names, `list_*`
    * prefixes, or `essential`. Kept unparsed on purpose: this file is a mirror of
@@ -28,7 +37,10 @@ export function missingConfigMessage(missing: string[]): string {
   return (
     `missing required environment variable(s): ${missing.join(', ')}\n` +
     'Required: WG_EASY_URL (e.g. https://vpn.example.com:51821), WG_EASY_USERNAME, WG_EASY_PASSWORD\n' +
-    'Optional: WG_EASY_INSECURE_TLS=true to accept self-signed certificates'
+    'Optional: WG_EASY_READ_ONLY=true to expose only read tools, ' +
+    'WG_EASY_INSECURE_TLS=true to accept self-signed certificates, ' +
+    'WG_EASY_ALLOW_TOOLS / WG_EASY_DENY_TOOLS to choose which tools load, ' +
+    'ELICITATION=false to fall back to the two-call confirmation token'
   );
 }
 
@@ -39,6 +51,30 @@ export function missingConfigKeys(config: Config): string[] {
     !config.username && 'WG_EASY_USERNAME',
     !config.password && 'WG_EASY_PASSWORD',
   ].filter((v): v is string => Boolean(v));
+}
+
+/**
+ * Reads `ELICITATION` — deliberately unprefixed, and deliberately fatal on
+ * anything it does not recognise.
+ *
+ * Unprefixed: environment variables are process-wide, so this is one switch for
+ * every server in the same environment. That is also its risk, which is why a
+ * server started with it off says so on its startup line.
+ *
+ * Fatal: this is the first variable of the family that defaults to *on*. The
+ * others fail open on a typo, which is the safe direction for them. Here a typo
+ * would leave the dialog running while the operator believes it is off — and an
+ * operator who believes that has no way to find out.
+ */
+export function parseElicitation(raw: string | undefined): boolean {
+  const value = raw?.trim().toLowerCase();
+  if (value === undefined || value === '' || value === 'true') return true;
+  if (value === 'false') return false;
+  console.error(
+    `wg-easy-mcp: ELICITATION must be "true" or "false" — got "${raw}". ` +
+      'Refusing to start rather than guess.'
+  );
+  process.exit(1);
 }
 
 /**
@@ -68,6 +104,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   delete env.WG_EASY_USERNAME;
   delete env.WG_EASY_PASSWORD;
 
+  // After the deletes, deliberately: this one can exit the process, and an exit
+  // above would leave the credentials in the environment for whatever runs next.
+  const elicitation = parseElicitation(env.ELICITATION);
+
   const missing = [
     !url && 'WG_EASY_URL',
     !username && 'WG_EASY_USERNAME',
@@ -85,6 +125,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       password,
       insecureTls,
       readOnly,
+      elicitation,
       allowTools,
       denyTools,
     };
@@ -133,6 +174,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     password,
     insecureTls,
     readOnly,
+    elicitation,
     allowTools,
     denyTools,
   };

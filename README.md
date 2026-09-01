@@ -48,6 +48,7 @@ Configuration is provided via environment variables:
 | `WG_EASY_INSECURE_TLS` | no       | Set to `true` to accept self-signed TLS certificates (scoped to the wg-easy connection) |
 | `WG_EASY_ALLOW_TOOLS`  | no       | Comma-separated tool names, `list_*` prefixes, or `essential` for a curated preset      |
 | `WG_EASY_DENY_TOOLS`   | no       | Same syntax; removed from whatever `WG_EASY_ALLOW_TOOLS` left                           |
+| `ELICITATION`          | no       | `false` replaces the approval dialog with the two-call token. **Not prefixed**          |
 
 > **Use `https://`.** With a plain-`http` URL the Basic Auth credentials and all
 > WireGuard private keys travel unencrypted; the server prints a warning unless
@@ -181,18 +182,31 @@ exposed):
 | ---------------------------------- | ------------------------------------------------------------------------------------------- |
 | `list_clients`                     | List all WireGuard clients with status and traffic statistics                               |
 | `get_client`                       | Get the full details of a single client                                                     |
-| `create_client`                    | Create a new client (`name`, optional `expiresAt`)                                          |
-| `update_client`                    | Update a client; only the provided fields are changed                                       |
+| `create_client` 👤                 | Create a new client (`name`, optional `expiresAt`)                                          |
+| `update_client` 👤                 | Update a client; only the provided fields are changed                                       |
 | `enable_client` / `disable_client` | Enable or disable a client                                                                  |
-| `delete_client`                    | Permanently delete a client — two-step, guarded by a confirmation token                     |
+| `delete_client` 👤                 | Permanently delete a client                                                                 |
 | `get_client_config`                | Get the client's WireGuard `.conf` file                                                     |
 | `get_client_qrcode`                | Get the client configuration as a QR code (SVG)                                             |
-| `generate_one_time_link`           | Generate a one-time config download link (requires one-time links to be enabled in wg-easy) |
+| `generate_one_time_link` 👤        | Generate a one-time config download link (requires one-time links to be enabled in wg-easy) |
 | `get_server_info`                  | Release/update status, general settings and interface configuration (secrets redacted)      |
+
+👤 asks a person through MCP elicitation · falls back to a two-call
+`confirm_token` where the client cannot show a dialog.
 
 ### Safety
 
-- `delete_client` is a two-step operation: the first call returns a random confirmation token (valid for 5 minutes, bound to the client ID) and only a second call with that exact token deletes the client. Unlike a plain `confirm=true` parameter, the token cannot be guessed or pre-supplied by the model or by injected text.
+- **Four tools ask a person, not just the model.** `create_client`,
+  `update_client`, `delete_client` and `generate_one_time_link` raise a real
+  dialog through MCP elicitation where the client supports it. Only one of the
+  four destroys anything — the others issue a VPN credential, can widen a
+  route, and mint an unauthenticated URL that hands out a private key. Where the
+  client cannot show a dialog they fall back to a random token valid for 5
+  minutes and bound to the exact target (for `update_client`, to the exact
+  edit), which proves the call was made twice with the same arguments and
+  nothing more. `ELICITATION=false` takes that fallback deliberately; it never
+  removes the guard. See
+  [Asking a person](https://wg-easy-mcp.ni-c.de/guide/approval).
 - `get_server_info` redacts secret fields (`privateKey`, `preSharedKey`, `password`, session/TOTP secrets) from the admin API responses.
 - Everything the wg-easy API returns carries an explicit **untrusted-data marker** and a 60 000-character budget. Client names, DNS entries and endpoints are free-form strings, so they are marked as data to report rather than instructions to follow, and a single oversized field cannot flood the model's context.
 - A `WG_EASY_URL` containing embedded credentials (`user:password@host`) is rejected at startup — they would otherwise be echoed in the startup log and prefixed onto every request.

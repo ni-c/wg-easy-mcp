@@ -86,21 +86,25 @@ deleting.
 Permanently deletes a client. **Irreversible** — the peer loses access and its
 keys cannot be restored.
 
-| Argument       | Type             | Required | Description                                  |
-| -------------- | ---------------- | -------- | -------------------------------------------- |
-| `clientId`     | positive integer | yes      | Which client                                 |
-| `confirmToken` | string           | no       | Token from the first call. Omit on that call |
+| Argument        | Type             | Required | Description                                                      |
+| --------------- | ---------------- | -------- | ---------------------------------------------------------------- |
+| `clientId`      | positive integer | yes      | Which client                                                     |
+| `confirm_token` | string           | no       | Only on the fallback path — see [Approval](../guide/approval.md) |
 
-The flow:
-
-1. Call without `confirmToken`. The tool checks the client exists and returns an
-   error result carrying a random token, valid **5 minutes**, bound to that
-   client ID.
-2. Confirm with the user.
-3. Call again with the exact token. The token is consumed on use.
+Where the MCP client supports elicitation, this raises a **dialog a person has
+to tick**, showing the client's name; the model cannot answer it on their
+behalf. Where it does not, the tool falls back to a two-call token: the first
+call returns a random token valid **5 minutes** and bound to that client ID,
+the second has to quote it back, and the token is consumed on use.
 
 A token issued for one client ID will not delete another, and an expired token
 simply starts the flow over.
+
+::: warning The parameter was renamed in 0.5.0
+It used to be `confirmToken`. The whole family spells it `confirm_token`, and a
+prompt that tells a model which argument to send has to name the one the schema
+declares.
+:::
 
 ## get_client_config
 

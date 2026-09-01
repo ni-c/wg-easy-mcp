@@ -30,19 +30,42 @@ VPN itself.
 
 ## Guard rails in the server
 
-### Deleting takes two calls
+### Four tools ask a person
 
-`delete_client` will not delete on the first call. It verifies the client exists,
-then returns a random 128-bit token that is **bound to that client ID** and valid
-for **five minutes**. Only a second call carrying that exact token deletes.
+`create_client`, `update_client`, `delete_client` and `generate_one_time_link`
+put the question to a **person** before they act, through MCP elicitation — a
+dialog the model cannot answer on its behalf, and which nothing proceeds without.
 
-The reason it is a token and not a `confirm: true` flag: a boolean is something
-the model can set by itself on the first call, including when it has been steered
-there by text it read somewhere. A random value that only exists in a previous
-tool response cannot be produced that way.
+Only one of the four destroys anything. The other three are on the list because
+`destructiveHint` is the wrong axis for what they do:
 
-The confirmation message quotes the client **ID and nothing else** — never the
-client's name — because that text is read by a model and a name is attacker-supplied.
+- `create_client` issues a credential that reaches every network behind the VPN.
+- `update_client` can move an address or widen `serverAllowedIps`. Its approval
+  is bound to the **exact edit**, so approving a rename does not license a later
+  call that widens the routes.
+- `generate_one_time_link` mints a URL that hands out a client's full
+  configuration — private key included — to anyone who has it, without
+  authentication.
+
+Where the client cannot show a dialog, all four fall back to a random 128-bit
+token bound to the same target and valid for **five minutes**; only a second call
+carrying that exact token acts. A boolean would not do: a model can set one by
+itself on the first call, including when it has been steered there by text it
+read somewhere.
+
+Be clear about what the token proves, because this server is: **the call was made
+twice with the same arguments, and nothing more.** A model can read it out of the
+first result and quote it back in the same turn. The fallback text says so rather
+than implying somebody approved, and names whether it was the client that could
+not be asked or the operator who switched the dialog off with
+`ELICITATION=false`.
+
+The prompt shows the client's **name** on a labelled line under a heading saying
+those values did not come from this server. A dialog that says only "Delete
+client 5?" is not something a person can act on; a name in the server's own
+sentence would read as the server vouching for it.
+
+See [Asking a person](/guide/approval).
 
 ### Admin secrets are redacted
 

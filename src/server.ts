@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
 import { McpServer } from '@modelcontextprotocol/server';
 
+import { ConfirmationStore, createApproval } from 'mcp-approval';
 import { buildToolFilter, installToolFilter } from 'mcp-tool-allowlist';
 
 import { WgEasyApi } from './api.js';
@@ -50,6 +51,13 @@ export function createServer(config: Config): McpServer {
   });
 
   const api = new WgEasyApi(config);
+  const confirmations = new ConfirmationStore();
+  // One approver per server: it holds the key that seals the request state
+  // carried out through the client and back.
+  const approval = createApproval({
+    server: 'wg-easy-mcp',
+    elicitation: config.elicitation,
+  });
 
   const server = new McpServer({
     name: 'wg-easy-mcp',
@@ -60,7 +68,7 @@ export function createServer(config: Config): McpServer {
   // register call and does not care how they are organised.
   installToolFilter(server, filter);
 
-  registerClientTools(server, api);
+  registerClientTools(server, api, confirmations, approval);
   registerServerInfoTools(server, api);
 
   return server;

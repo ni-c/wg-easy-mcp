@@ -1,28 +1,55 @@
 # Environment variables
 
-| Variable               | Required | Default | Description                                                               |
-| ---------------------- | -------- | ------- | ------------------------------------------------------------------------- |
-| `WG_EASY_URL`          | yes      | —       | Base URL of the wg-easy web UI, e.g. `https://vpn.example.com:51821`      |
-| `WG_EASY_USERNAME`     | yes      | —       | Username of a wg-easy admin account (2FA must be disabled)                |
-| `WG_EASY_PASSWORD`     | yes      | —       | Password of that account                                                  |
-| `WG_EASY_INSECURE_TLS` | no       | `false` | `true` accepts self-signed certificates, scoped to the wg-easy connection |
+| Variable               | Required | Default | Description                                                                    |
+| ---------------------- | -------- | ------- | ------------------------------------------------------------------------------ |
+| `WG_EASY_URL`          | yes      | —       | Base URL of the wg-easy web UI, e.g. `https://vpn.example.com:51821`           |
+| `WG_EASY_USERNAME`     | yes      | —       | Username of a wg-easy admin account (2FA must be disabled)                     |
+| `WG_EASY_PASSWORD`     | yes      | —       | Password of that account                                                       |
+| `WG_EASY_INSECURE_TLS` | no       | `false` | `true` accepts self-signed certificates, scoped to the wg-easy connection      |
+| `WG_EASY_READ_ONLY`    | no       | `false` | `true` registers only the read tools                                           |
+| `WG_EASY_ALLOW_TOOLS`  | no       | —       | Tool names, `list_*` prefixes or `essential`; only these register              |
+| `WG_EASY_DENY_TOOLS`   | no       | —       | Same syntax; subtracted from whatever the allow list left                      |
+| `ELICITATION`          | no       | `true`  | `false` replaces the approval dialog with the two-call token. **Not prefixed** |
 
 There is no configuration file and no command-line flag; these are the whole
 surface. The reasoning behind each is in [Configuration](/guide/configuration).
 
 ## Validation at startup
 
-| Condition                                          | Result                                         |
-| -------------------------------------------------- | ---------------------------------------------- |
-| A required variable is missing                     | Warning; the server starts and lists tools     |
-| `WG_EASY_URL` does not parse                       | **Exit 1**                                     |
-| `WG_EASY_URL` scheme is not `http`/`https`         | **Exit 1**                                     |
-| `WG_EASY_URL` contains `user:password@`            | **Exit 1**                                     |
-| `WG_EASY_URL` is plain http to a non-loopback host | Warning about unencrypted credentials and keys |
-| `WG_EASY_INSECURE_TLS=true`                        | Warning that certificate validation is relaxed |
+| Condition                                          | Result                                                        |
+| -------------------------------------------------- | ------------------------------------------------------------- |
+| A required variable is missing                     | Warning; the server starts and lists tools                    |
+| `WG_EASY_URL` does not parse                       | **Exit 1**                                                    |
+| `WG_EASY_URL` scheme is not `http`/`https`         | **Exit 1**                                                    |
+| `WG_EASY_URL` contains `user:password@`            | **Exit 1**                                                    |
+| `WG_EASY_URL` is plain http to a non-loopback host | Warning about unencrypted credentials and keys                |
+| `WG_EASY_INSECURE_TLS=true`                        | Warning that certificate validation is relaxed                |
+| `ELICITATION` is neither `true` nor `false`        | **Exit 1**, naming both valid values                          |
+| `ELICITATION=false`                                | One line saying guarded tools fall back to the two-call token |
 
 All diagnostics go to **stderr**, which is where MCP stdio servers must log —
 stdout carries the protocol.
+
+## `ELICITATION`
+
+Whether a client that _can_ show a dialog is asked before `create_client`,
+`update_client`, `delete_client` or `generate_one_time_link` acts. `false` takes
+the two-call-token path instead — it does not remove the guard, and a server
+started with it off prints one line saying so.
+
+Two ways it differs from every other variable here:
+
+- **No prefix.** One `export ELICITATION=false` reaches every MCP server in the
+  same environment, not just this one. That is the point of it and also its risk;
+  see [Asking a person](/guide/approval).
+- **Fatal on anything else.** Where `WG_EASY_INSECURE_TLS` fails _off_ on a typo,
+  this one stops the server with exit code 1. It is the only variable here that
+  defaults to _on_, and a typo that fell back would leave the dialog running while
+  you believed it was off.
+
+Values are trimmed and matched case-insensitively. It is read _after_
+`WG_EASY_USERNAME` and `WG_EASY_PASSWORD` are deleted from `process.env`, so the
+fatal path cannot leave the credentials sitting there for a crash reporter.
 
 ## Notes
 

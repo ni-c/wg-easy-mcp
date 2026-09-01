@@ -13,6 +13,20 @@ async function main(): Promise<void> {
       'wg-easy-mcp: WG_EASY_INSECURE_TLS=true — TLS certificate validation is disabled for the wg-easy connection'
     );
   }
+  if (config.readOnly) {
+    console.error(
+      'wg-easy-mcp: WG_EASY_READ_ONLY=true — write tools are not registered'
+    );
+  }
+  // Printed only when it is off, like the lines above. ELICITATION is
+  // unprefixed, so one `export ELICITATION=false` reaches every MCP server in
+  // the environment — this line is what makes that visible in the log of each
+  // one it actually reached.
+  if (!config.elicitation) {
+    console.error(
+      'wg-easy-mcp: ELICITATION=false — guarded tools fall back to the two-call token'
+    );
+  }
 
   let server;
   try {

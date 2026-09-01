@@ -69,6 +69,18 @@ Pass them through your MCP client's `env` block, as shown in
 line — it lands in shell history and in `ps` output — and avoid committing it to
 a config file that is under version control.
 
+## Turning the approval dialog off
+
+`create_client`, `update_client`, `delete_client` and `generate_one_time_link`
+ask a person through MCP elicitation before they act. `ELICITATION=false` takes
+them to the two-call token instead. It does not remove the guard; there is no
+setting in which a guarded call goes unannounced.
+
+The variable deliberately carries no `WG_EASY_` prefix, which means it reaches
+every MCP server in the same environment, and — unlike `WG_EASY_INSECURE_TLS` — a
+value it does not recognise **stops the server** rather than failing off. See
+[Asking a person](/guide/approval).
+
 ## Choosing the tools that load
 
 Read-only mode is one cut, along a line this server drew for you.

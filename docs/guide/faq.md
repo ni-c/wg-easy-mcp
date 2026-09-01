@@ -34,8 +34,9 @@ tools unconditionally. What you can do:
 - use an MCP client that asks before running non-read-only tools — the tools
   carry `readOnlyHint`, `destructiveHint` and `idempotentHint` annotations for
   exactly this,
-- rely on `delete_client`'s two-step confirmation, which no single call can
-  bypass.
+- rely on the four tools that [ask a person](/guide/approval) —
+  `create_client`, `update_client`, `delete_client` and
+  `generate_one_time_link` — which no single call can bypass.
 
 ## Why did `update_client` not change the field I asked for?
 

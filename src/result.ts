@@ -1,13 +1,12 @@
-import type { CallToolResult } from '@modelcontextprotocol/server';
+import type {
+  CallToolResult,
+  InputRequiredResult,
+} from '@modelcontextprotocol/server';
 
 import { WgEasyApiError } from './api.js';
 
 export function textResult(text: string): CallToolResult {
   return { content: [{ type: 'text', text }] };
-}
-
-export function jsonResult(data: unknown): CallToolResult {
-  return textResult(JSON.stringify(data, null, 2));
 }
 
 export function errorResult(text: string): CallToolResult {
@@ -80,10 +79,14 @@ function sanitizeErrorBody(body: string): string {
 /**
  * Runs a tool handler and converts thrown errors into MCP error results
  * instead of protocol-level failures.
+ *
+ * `InputRequiredResult` is in the return type because a guarded tool may end
+ * its call with a question rather than an answer: on `2026-07-28` the dialog
+ * *is* the return value, and the client retries carrying the reply.
  */
 export async function run(
-  fn: () => Promise<CallToolResult>
-): Promise<CallToolResult> {
+  fn: () => Promise<CallToolResult | InputRequiredResult>
+): Promise<CallToolResult | InputRequiredResult> {
   try {
     return await fn();
   } catch (error) {

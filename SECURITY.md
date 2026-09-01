@@ -10,7 +10,7 @@ Only the latest release and the current `main` branch receive security fixes.
 
 wg-easy-mcp is a stdio MCP server that administers a real [wg-easy](https://github.com/wg-easy/wg-easy) instance. It authenticates with the instance's admin credentials (`WG_EASY_USERNAME`/`WG_EASY_PASSWORD`), so anything that can read the server's process environment effectively holds VPN admin access: it can create, disable and delete peers and download their private keys via client configs and QR codes.
 
-The MCP client decides which tools get called. Deleting a client requires a two-step `confirmToken` handshake, but a client that completes it can still remove peers. Only connect the server to clients you trust with your VPN.
+The MCP client decides which tools get called. Creating, changing or deleting a client, and issuing a one-time configuration link, ask a person first through MCP elicitation — a dialog the model cannot answer on its behalf. Where the client cannot show one, those four fall back to a two-call `confirm_token`, which only proves the call was made twice with the same arguments. Only connect the server to clients you trust with your VPN.
 
 ## Deployment recommendations
 
