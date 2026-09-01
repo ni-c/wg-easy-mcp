@@ -2,6 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
 import type { WgEasyApi } from '../api.js';
+import { READ_ONLY } from './annotations.js';
 import { run, upstreamJsonResult } from '../result.js';
 
 const SENSITIVE_KEYS = new Set([
@@ -47,7 +48,7 @@ export function registerServerInfoTools(
       description:
         'Get information about the wg-easy instance: release/update status, general settings and the WireGuard interface configuration. Secret fields (private keys, passwords) are redacted.',
       inputSchema: z.object({}),
-      annotations: { readOnlyHint: true },
+      annotations: READ_ONLY,
     },
     () =>
       run(async () => {

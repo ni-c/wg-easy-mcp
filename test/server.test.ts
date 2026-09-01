@@ -140,6 +140,64 @@ describe('tool registration', () => {
     );
     expect(byName.get('list_clients')?.annotations?.readOnlyHint).toBe(true);
   });
+
+  it('declares all four annotation hints on every tool', async () => {
+    // Not a style rule. Two of the four default to a *stronger* claim than
+    // silence suggests: the specification gives destructiveHint and
+    // openWorldHint a default of true, so a tool that omits them announces
+    // itself as destructive and open-world. Three tools here shipped
+    // `annotations: {}`, which is the emptiest possible way of claiming both.
+    stubFetch(() => jsonResponse({}));
+    const client = await connectClient();
+    const { tools } = await client.listTools();
+    const hints = [
+      'readOnlyHint',
+      'destructiveHint',
+      'idempotentHint',
+      'openWorldHint',
+    ] as const;
+    for (const tool of tools) {
+      for (const hint of hints) {
+        expect(typeof tool.annotations?.[hint], `${tool.name}.${hint}`).toBe(
+          'boolean'
+        );
+      }
+    }
+  });
+
+  it('warns about the two writes that lose something, and no others', async () => {
+    stubFetch(() => jsonResponse({}));
+    const client = await connectClient();
+    const { tools } = await client.listTools();
+    const byName = new Map(tools.map((t) => [t.name, t.annotations]));
+    for (const additive of [
+      'create_client',
+      'enable_client',
+      'disable_client',
+      'generate_one_time_link',
+    ]) {
+      expect(byName.get(additive)?.destructiveHint, additive).toBe(false);
+    }
+    for (const destructive of ['update_client', 'delete_client']) {
+      expect(byName.get(destructive)?.destructiveHint, destructive).toBe(true);
+    }
+  });
+
+  it('does not call the key-handing reads destructive either', async () => {
+    // get_client_config and get_client_qrcode return a private key. They are
+    // still reads — readOnlyHint is about the server's state, not about how
+    // dangerous the answer is to hold. The risk in those two is a disclosure
+    // one and no annotation carries it; the description says SENSITIVE and
+    // that is the honest place for it.
+    stubFetch(() => jsonResponse({}));
+    const client = await connectClient();
+    const { tools } = await client.listTools();
+    const byName = new Map(tools.map((t) => [t.name, t.annotations]));
+    for (const name of ['get_client_config', 'get_client_qrcode']) {
+      expect(byName.get(name)?.readOnlyHint, name).toBe(true);
+      expect(byName.get(name)?.destructiveHint, name).toBe(false);
+    }
+  });
 });
 
 describe('list_clients', () => {

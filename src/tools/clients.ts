@@ -10,6 +10,7 @@ import {
 } from '../result.js';
 
 import type { WgEasyApi } from '../api.js';
+import { READ_ONLY } from './annotations.js';
 
 const clientId = z.coerce
   .number()
@@ -77,7 +78,7 @@ export function registerClientTools(server: McpServer, api: WgEasyApi): void {
           .optional()
           .describe('Sort by name, ascending or descending'),
       }),
-      annotations: { readOnlyHint: true },
+      annotations: READ_ONLY,
     },
     ({ filter, sort }) =>
       run(async () => {
@@ -98,7 +99,7 @@ export function registerClientTools(server: McpServer, api: WgEasyApi): void {
       title: 'Get WireGuard client',
       description: 'Get the full details of a single WireGuard client.',
       inputSchema: z.object({ clientId }),
-      annotations: { readOnlyHint: true },
+      annotations: READ_ONLY,
     },
     ({ clientId }) =>
       run(async () =>
@@ -124,7 +125,15 @@ export function registerClientTools(server: McpServer, api: WgEasyApi): void {
             'Optional expiry date as ISO string (e.g. 2026-12-31). Omit for no expiry.'
           ),
       }),
-      annotations: {},
+      annotations: {
+        // Additive: it grants a new VPN identity and takes nothing away. Not
+        // idempotent — wg-easy keys clients by an id it generates, so calling
+        // twice leaves two clients with two key pairs.
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
     },
     ({ name, expiresAt }) =>
       run(async () =>
@@ -186,7 +195,16 @@ export function registerClientTools(server: McpServer, api: WgEasyApi): void {
           .optional()
           .describe('Persistent keepalive interval in seconds (0 = off)'),
       }),
-      annotations: {},
+      annotations: {
+        // Destructive: the fields it is given replace what was there, and an
+        // address or allowed-IP range that is overwritten is not recoverable
+        // from here. Only the provided fields change, so sending the same call
+        // twice lands on the same client.
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
     ({ clientId, ...changes }) =>
       run(async () => {
@@ -216,7 +234,13 @@ export function registerClientTools(server: McpServer, api: WgEasyApi): void {
       title: 'Enable WireGuard client',
       description: 'Enable a WireGuard client so it can connect again.',
       inputSchema: z.object({ clientId }),
-      annotations: { idempotentHint: true },
+      annotations: {
+        // Restores access rather than removing it.
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
     ({ clientId }) =>
       run(async () =>
@@ -234,7 +258,14 @@ export function registerClientTools(server: McpServer, api: WgEasyApi): void {
       description:
         'Disable a WireGuard client. The client keeps its configuration but can no longer connect.',
       inputSchema: z.object({ clientId }),
-      annotations: { idempotentHint: true },
+      annotations: {
+        // Not destructive: the client and its keys stay, only the tunnel stops.
+        // enable_client puts it back.
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
     ({ clientId }) =>
       run(async () =>
@@ -260,7 +291,15 @@ export function registerClientTools(server: McpServer, api: WgEasyApi): void {
             'Confirmation token from a previous delete_client call for the same client. Omit on the first call.'
           ),
       }),
-      annotations: { destructiveHint: true },
+      annotations: {
+        // Idempotent by the specification's wording — "no additional effect on
+        // its environment". The second call fails, but the world is the same
+        // either way, which is what lets a client retry after a timeout.
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
     ({ clientId, confirmToken }) =>
       run(async () => {
@@ -295,7 +334,7 @@ export function registerClientTools(server: McpServer, api: WgEasyApi): void {
       description:
         'Get the WireGuard configuration file (wg .conf format) for a client. SENSITIVE: the output contains the client private key — treat it as a secret and do not repeat it unnecessarily.',
       inputSchema: z.object({ clientId }),
-      annotations: { readOnlyHint: true },
+      annotations: READ_ONLY,
     },
     ({ clientId }) =>
       run(async () =>
@@ -313,7 +352,7 @@ export function registerClientTools(server: McpServer, api: WgEasyApi): void {
       description:
         'Get the client configuration as a QR code (SVG markup) for scanning with the WireGuard mobile app. SENSITIVE: the QR code encodes the client private key — treat it as a secret.',
       inputSchema: z.object({ clientId }),
-      annotations: { readOnlyHint: true },
+      annotations: READ_ONLY,
     },
     ({ clientId }) =>
       run(async () =>
@@ -331,7 +370,17 @@ export function registerClientTools(server: McpServer, api: WgEasyApi): void {
       description:
         'Generate a one-time download link for a client configuration that can be shared with the end user. Requires WG_ENABLE_ONE_TIME_LINKS to be enabled on the wg-easy instance. SENSITIVE: anyone with the link can download the full client configuration without authentication — share it only with the intended user.',
       inputSchema: z.object({ clientId }),
-      annotations: {},
+      annotations: {
+        // Destroys nothing, and that is the whole difficulty with this one: it
+        // mints a URL that hands the full client configuration — private key
+        // included — to anyone who has it, without authentication. destructiveHint
+        // is the wrong axis for that risk, which is why the tool is guarded
+        // instead. Not idempotent: each call issues a fresh link.
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
     },
     ({ clientId }) =>
       run(async () => {
