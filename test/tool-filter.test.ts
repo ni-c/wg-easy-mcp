@@ -16,6 +16,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ALL_TOOLS,
   ESSENTIAL_TOOLS,
+  KEY_TOOLS,
   READ_TOOLS,
   WRITE_TOOLS,
 } from '../src/tools/catalogue.js';
@@ -65,14 +66,55 @@ describe('the catalogue', () => {
     expect(await toolNames()).toEqual([...ALL_TOOLS].sort());
   });
 
-  it('splits into read and write with nothing left over', async () => {
-    expect([...READ_TOOLS, ...WRITE_TOOLS].sort()).toEqual(
+  it('splits into three disjoint lists with nothing left over', async () => {
+    expect([...READ_TOOLS, ...KEY_TOOLS, ...WRITE_TOOLS].sort()).toEqual(
       [...ALL_TOOLS].sort()
     );
-    expect(
-      READ_TOOLS.filter((t) => (WRITE_TOOLS as readonly string[]).includes(t))
-    ).toEqual([]);
+    expect(new Set([...READ_TOOLS, ...KEY_TOOLS, ...WRITE_TOOLS]).size).toEqual(
+      ALL_TOOLS.length
+    );
     expect(await toolNames({ readOnly: true })).toEqual([...READ_TOOLS].sort());
+  });
+
+  it('does not leave key disclosure standing under read-only', async () => {
+    // The finding this pins. `get_client_config` and `get_client_qrcode`
+    // return the client's `PrivateKey` in the clear. They used to count as
+    // read tools — so `WG_EASY_READ_ONLY=true`, the one coarse switch for
+    // putting this server in front of a less trusted session, changed nothing
+    // about them: `list_clients` then `get_client_config` yields one
+    // ready-to-use VPN configuration per peer.
+    //
+    // The two names are written out rather than taken from `KEY_TOOLS`.
+    // Iterating the list under test would make this pass by emptying that list,
+    // which is precisely the change it exists to catch.
+    expect(await toolNames({ readOnly: true })).toEqual([
+      'get_client',
+      'get_server_info',
+      'list_clients',
+    ]);
+  });
+
+  it('does not hand them out with the essential preset either', async () => {
+    // Same rule, other axis: `essential` is the recommendation, so a tool that
+    // discloses a key has to be named rather than arrive with a preset.
+    const essential = await toolNames({ allowTools: 'essential' });
+    expect(essential).not.toContain('get_client_config');
+    expect(essential).not.toContain('get_client_qrcode');
+    expect(essential).not.toContain('generate_one_time_link');
+    // Still composable, which is what makes the removal liveable: a session
+    // that has to hand out a configuration names the tool.
+    expect(
+      await toolNames({ allowTools: 'essential,get_client_config' })
+    ).toContain('get_client_config');
+  });
+
+  it('keeps both key tools reachable when they are named', async () => {
+    // Suppressed by default, not removed. `KEY_TOOLS` is the list of what has
+    // to stay callable under an explicit allow list.
+    for (const tool of KEY_TOOLS) {
+      expect(await toolNames({ allowTools: tool })).toEqual([tool]);
+    }
+    expect(KEY_TOOLS).toHaveLength(2);
   });
 
   it('holds names the env-var syntax cannot misread', () => {

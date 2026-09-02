@@ -1,15 +1,15 @@
 # Environment variables
 
-| Variable               | Required | Default | Description                                                                    |
-| ---------------------- | -------- | ------- | ------------------------------------------------------------------------------ |
-| `WG_EASY_URL`          | yes      | —       | Base URL of the wg-easy web UI, e.g. `https://vpn.example.com:51821`           |
-| `WG_EASY_USERNAME`     | yes      | —       | Username of a wg-easy admin account (2FA must be disabled)                     |
-| `WG_EASY_PASSWORD`     | yes      | —       | Password of that account                                                       |
-| `WG_EASY_INSECURE_TLS` | no       | `false` | `true` accepts self-signed certificates, scoped to the wg-easy connection      |
-| `WG_EASY_READ_ONLY`    | no       | `false` | `true` registers only the read tools                                           |
-| `WG_EASY_ALLOW_TOOLS`  | no       | —       | Tool names, `list_*` prefixes or `essential`; only these register              |
-| `WG_EASY_DENY_TOOLS`   | no       | —       | Same syntax; subtracted from whatever the allow list left                      |
-| `ELICITATION`          | no       | `true`  | `false` replaces the approval dialog with the two-call token. **Not prefixed** |
+| Variable               | Required | Default | Description                                                                     |
+| ---------------------- | -------- | ------- | ------------------------------------------------------------------------------- |
+| `WG_EASY_URL`          | yes      | —       | Base URL of the wg-easy web UI, e.g. `https://vpn.example.com:51821`            |
+| `WG_EASY_USERNAME`     | yes      | —       | Username of a wg-easy admin account (2FA must be disabled)                      |
+| `WG_EASY_PASSWORD`     | yes      | —       | Password of that account                                                        |
+| `WG_EASY_INSECURE_TLS` | no       | `false` | `true` accepts self-signed certificates, scoped to the wg-easy connection       |
+| `WG_EASY_READ_ONLY`    | no       | `false` | `1`/`true`/`yes` registers `list_clients`, `get_client`, `get_server_info` only |
+| `WG_EASY_ALLOW_TOOLS`  | no       | —       | Tool names, `list_*` prefixes or `essential`; only these register               |
+| `WG_EASY_DENY_TOOLS`   | no       | —       | Same syntax; subtracted from whatever the allow list left                       |
+| `ELICITATION`          | no       | `true`  | `false` replaces the approval dialog with the two-call token. **Not prefixed**  |
 
 There is no configuration file and no command-line flag; these are the whole
 surface. The reasoning behind each is in [Configuration](/guide/configuration).
@@ -33,7 +33,8 @@ stdout carries the protocol.
 ## `ELICITATION`
 
 Whether a client that _can_ show a dialog is asked before `create_client`,
-`update_client`, `delete_client` or `generate_one_time_link` acts. `false` takes
+`update_client`, `enable_client`, `delete_client` or `generate_one_time_link`
+acts. `false` takes
 the two-call-token path instead — it does not remove the guard, and a server
 started with it off prints one line saying so.
 
@@ -51,10 +52,37 @@ Values are trimmed and matched case-insensitively. It is read _after_
 `WG_EASY_USERNAME` and `WG_EASY_PASSWORD` are deleted from `process.env`, so the
 fatal path cannot leave the credentials sitting there for a crash reporter.
 
+## `WG_EASY_READ_ONLY`
+
+Registers `list_clients`, `get_client` and `get_server_info`, and nothing else.
+
+Note what it **also** suppresses, because the name does not say it:
+`get_client_config` and `get_client_qrcode`. Both are reads — nothing on the
+instance changes, and both carry `readOnlyHint: true` — but what they read is a
+client's private key in the clear. Read-only mode is the coarse switch for
+putting this server in front of a less trusted session, so leaving key
+disclosure standing would make the mode weaker than its name. `list_clients`
+followed by `get_client_config` yields one ready-to-use VPN configuration per
+peer.
+
+They are also out of `WG_EASY_ALLOW_TOOLS=essential`. To have them, name them:
+`WG_EASY_ALLOW_TOOLS=essential,get_client_config` — which is not available under
+read-only mode, where they are suppressed outright.
+
+What it does **not** suppress: `get_client` and `list_clients` still return
+every client's addresses, routes and public key. Private keys, pre-shared keys
+and live one-time-link tokens are redacted from both.
+
 ## Notes
 
+- `WG_EASY_READ_ONLY` accepts `1`, `true` and `yes`, trimmed and
+  case-insensitively. It is the switch that fails _towards_ the restriction, so
+  every spelling an operator plausibly writes has to close it — `WG_EASY_READ_ONLY=1`
+  silently leaving the write tools registered is the one outcome it must not have.
 - Only the exact string `true` enables `WG_EASY_INSECURE_TLS`; anything else,
-  including `1` and `yes`, leaves it off.
+  including `1` and `yes`, leaves it off. The asymmetry with the line above is
+  deliberate: a typo there fails towards relaxed certificate validation, so that
+  one keeps the exact-match rule.
 - Trailing slashes on `WG_EASY_URL` are stripped.
 - `WG_EASY_USERNAME` and `WG_EASY_PASSWORD` are **deleted from `process.env`**
   once the configuration has been read.

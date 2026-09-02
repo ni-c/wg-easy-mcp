@@ -14,8 +14,8 @@ A [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server for adm
 Lets MCP clients like Claude Code, Claude Desktop or Codex manage your WireGuard VPN: list, create, update, enable/disable and delete clients, fetch configuration files and QR codes, and inspect the server status — all through the wg-easy v15 REST API.
 
 Eleven tools is the ceiling, not the floor: `WG_EASY_ALLOW_TOOLS=essential`
-registers a curated eight instead, and a model picks the right tool far more
-reliably from eight than from eleven — see
+registers a curated six instead, and a model picks the right tool far more
+reliably from six than from eleven — see
 [choosing which tools load](#choosing-which-tools-load).
 
 <!-- <picture> is resolved against the colour scheme of the page showing it, so GitHub
@@ -63,10 +63,15 @@ instructions instead of reaching the wg-easy API.
 
 `WG_EASY_ALLOW_TOOLS` and `WG_EASY_DENY_TOOLS` take comma-separated tool names;
 a trailing `*` matches a whole family. `essential` is a curated preset of
-eight: `get_server_info`, `list_clients`, `get_client`, `create_client`, `get_client_config`, `get_client_qrcode`, `enable_client`, `disable_client`.
+six: `get_server_info`, `list_clients`, `get_client`, `create_client`, `enable_client`, `disable_client`.
+
+`get_client_config`, `get_client_qrcode` and `generate_one_time_link` are not in
+it, and neither is `delete_client`: all four either destroy something
+irreversibly or hand out a peer's private key. Name them where you want them.
 
 ```sh
 WG_EASY_ALLOW_TOOLS=essential
+WG_EASY_ALLOW_TOOLS=essential,get_client_config
 WG_EASY_ALLOW_TOOLS=list_clients,get_client_config
 WG_EASY_DENY_TOOLS=delete_client,create_client
 ```
@@ -178,40 +183,44 @@ exposed):
 
 ## Tools
 
-| Tool                               | Description                                                                                 |
-| ---------------------------------- | ------------------------------------------------------------------------------------------- |
-| `list_clients`                     | List all WireGuard clients with status and traffic statistics                               |
-| `get_client`                       | Get the full details of a single client                                                     |
-| `create_client` 👤                 | Create a new client (`name`, optional `expiresAt`)                                          |
-| `update_client` 👤                 | Update a client; only the provided fields are changed                                       |
-| `enable_client` / `disable_client` | Enable or disable a client                                                                  |
-| `delete_client` 👤                 | Permanently delete a client                                                                 |
-| `get_client_config`                | Get the client's WireGuard `.conf` file                                                     |
-| `get_client_qrcode`                | Get the client configuration as a QR code (SVG)                                             |
-| `generate_one_time_link` 👤        | Generate a one-time config download link (requires one-time links to be enabled in wg-easy) |
-| `get_server_info`                  | Release/update status, general settings and interface configuration (secrets redacted)      |
+| Tool                        | Description                                                                            |
+| --------------------------- | -------------------------------------------------------------------------------------- |
+| `list_clients`              | List all WireGuard clients with status and traffic statistics                          |
+| `get_client`                | Get the full details of a single client                                                |
+| `create_client` 👤          | Create a new client (`name`, optional `expiresAt`)                                     |
+| `update_client` 👤          | Update a client; only the provided fields are changed                                  |
+| `enable_client` 👤          | Let a client connect again — re-arms a key pair already installed on the peer          |
+| `disable_client`            | Block a client; it keeps its configuration and keys                                    |
+| `delete_client` 👤          | Permanently delete a client                                                            |
+| `get_client_config`         | Get the client's WireGuard `.conf` file                                                |
+| `get_client_qrcode`         | Get the client configuration as a QR code (SVG)                                        |
+| `generate_one_time_link` 👤 | Generate a one-time config download link, valid five minutes                           |
+| `get_server_info`           | Release/update status, general settings and interface configuration (secrets redacted) |
 
 👤 asks a person through MCP elicitation · falls back to a two-call
 `confirm_token` where the client cannot show a dialog.
 
 ### Safety
 
-- **Four tools ask a person, not just the model.** `create_client`,
-  `update_client`, `delete_client` and `generate_one_time_link` raise a real
-  dialog through MCP elicitation where the client supports it. Only one of the
-  four destroys anything — the others issue a VPN credential, can widen a
-  route, and mint an unauthenticated URL that hands out a private key. Where the
+- **Five tools ask a person, not just the model.** `create_client`,
+  `update_client`, `enable_client`, `delete_client` and `generate_one_time_link`
+  raise a real dialog through MCP elicitation where the client supports it. Only
+  one of the five destroys anything — the others issue a VPN credential, re-arm
+  one, can widen a route, and mint an unauthenticated URL that hands out a
+  private key. `disable_client` is the one write tool that never asks: it can
+  only withdraw access. Where the
   client cannot show a dialog they fall back to a random token valid for 5
   minutes and bound to the exact target (for `update_client`, to the exact
   edit), which proves the call was made twice with the same arguments and
   nothing more. `ELICITATION=false` takes that fallback deliberately; it never
   removes the guard. See
   [Asking a person](https://wg-easy-mcp.ni-c.de/guide/approval).
-- **Key material is redacted everywhere it is not the point.** `privateKey`, `preSharedKey`, `password` and session/TOTP secrets are replaced with `[redacted]` at every nesting level — in `get_server_info`'s admin responses, which carry the WireGuard _server_ key, and in `list_clients` and `get_client`, which carry each client's _own_ key. `get_client_config` and `get_client_qrcode` are the deliberate exceptions: handing a peer its configuration is what they are for, and somebody asked.
+- **Key material is redacted everywhere it is not the point.** `privateKey`, `preSharedKey`, `password` and session/TOTP secrets are replaced with `[redacted]` at every nesting level — in `get_server_info`'s admin responses, which carry the WireGuard _server_ key, and in `list_clients` and `get_client`, which carry each client's _own_ key. Live one-time-link tokens are redacted from the same two, because `GET /cnf/<token>` serves the whole configuration with no login at all; `expiresAt` survives, so a listing still shows that a link is live. `get_client_config`, `get_client_qrcode` and `generate_one_time_link` are the deliberate exceptions: handing a peer its configuration is what they are for, and somebody asked.
 - Everything the wg-easy API returns carries an explicit **untrusted-data marker** and a 60 000-character budget. Client names, DNS entries and endpoints are free-form strings, so they are marked as data to report rather than instructions to follow, and a single oversized field cannot flood the model's context.
 - A `WG_EASY_URL` containing embedded credentials (`user:password@host`) is rejected at startup — they would otherwise be echoed in the startup log and prefixed onto every request.
 - Upstream error bodies are truncated and HTML error pages (reverse proxies) are dropped before being returned to the MCP client.
 - `WG_EASY_INSECURE_TLS` only relaxes certificate validation for the wg-easy connection — it does not disable TLS verification process-wide.
+- **`WG_EASY_READ_ONLY=true` registers `list_clients`, `get_client` and `get_server_info`, and nothing else.** `get_client_config` and `get_client_qrcode` are reads and still not in that set: what they read is a client's private key in the clear, and a read-only mode that leaves key disclosure standing is not the mode its name promises.
 - Tools carry MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`) so hosts can apply appropriate permission policies.
 - Keep in mind that `get_client_config` and `get_client_qrcode` return the client's **private key**, and a `generate_one_time_link` URL allows an unauthenticated config download — treat tool output as sensitive.
 
