@@ -7,6 +7,7 @@
 [![license](https://img.shields.io/npm/l/wg-easy-mcp)](LICENSE)
 [![container](https://img.shields.io/badge/ghcr.io-ni--c%2Fwg--easy--mcp-blue)](https://github.com/ni-c/wg-easy-mcp/pkgs/container/wg-easy-mcp)
 [![docs](https://img.shields.io/badge/docs-wg--easy--mcp.ni--c.de-informational)](https://wg-easy-mcp.ni-c.de)
+[![HTTP • via mcp-hub](https://img.shields.io/badge/HTTP-via%20mcp--hub-6f42c1)](https://mcp-hub.ni-c.de)
 [![sponsor](https://img.shields.io/badge/sponsor-ni--c-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/ni-c)
 
 A [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server for administering [wg-easy](https://github.com/wg-easy/wg-easy) (WireGuard Easy) instances.
@@ -27,6 +28,18 @@ reliably from six than from eleven — see
   <source media="(prefers-color-scheme: light)" srcset="https://wg-easy-mcp.ni-c.de/architecture-light.svg">
   <img src="https://wg-easy-mcp.ni-c.de/architecture.svg" alt="An MCP client speaks stdio to wg-easy-mcp, which calls the wg-easy v15 REST API over HTTPS with Basic Authentication" width="800">
 </picture>
+
+## What makes it different
+
+**The full client lifecycle over the wg-easy v15 REST API**, including `.conf`
+files, QR codes and one-time download links.
+
+**Partial updates merge.** An update reads the current client state and changes
+only the fields you named, instead of overwriting the rest with defaults.
+
+**`disable_client` stays ungated on purpose.** Every other write asks a person
+first through MCP elicitation; that one only ever withdraws access, and making it
+harder would be making the safe move the slow one.
 
 ## Requirements
 
@@ -181,6 +194,36 @@ exposed):
 }
 ```
 
+### Through mcp-hub
+
+A client that cannot spawn a local process — ChatGPT connectors, Claude on the web,
+Cursor, LibreChat — reaches wg-easy-mcp through [mcp-hub](https://mcp-hub.ni-c.de): one
+container serves many stdio MCP servers over Streamable HTTP, with an OAuth 2.1 login
+behind a single password and long-lived tokens for the clients that cannot do OAuth. Its
+`/hub` endpoint puts every server behind six meta-tools, so one connector reaches all of
+them without N×tool schemas in the model's context, and it speaks both protocol revisions
+— a question this server asks travels through it to the person at the far end.
+
+Its `/config/mcp.json` uses Claude Code's format, so the entry is the one you already
+have:
+
+```json
+{
+  "mcpServers": {
+    "wg-easy": {
+      "command": "npx",
+      "args": ["-y", "wg-easy-mcp"],
+      "env": { "WG_EASY_ALLOW_TOOLS": "essential" },
+      "denyTools": ["delete_client"]
+    }
+  }
+}
+```
+
+`allowTools` and `denyTools` there are the hub's **own** per-server filter, which is not
+the same thing as `*_ALLOW_TOOLS` in `env` — the difference, and the mistake it invites,
+are in the [client guide](https://wg-easy-mcp.ni-c.de/guide/clients#through-mcp-hub).
+
 ## Tools
 
 | Tool                        | Description                                                                            |
@@ -267,6 +310,36 @@ release that adds a field into a tool that fails outright.
 
 The full trust model is in [SECURITY.md](SECURITY.md) and, in prose, at [wg-easy-mcp.ni-c.de/guide/security](https://wg-easy-mcp.ni-c.de/guide/security).
 
+## Not exposed, on purpose
+
+**wg-easy v15 or newer only.** Older versions expose a different, session-based
+API that this server does not implement.
+
+**No server administration.** The tools cover the client lifecycle; the instance's
+own configuration, its admin accounts and its host stay outside the tool list.
+
+## Safety
+
+- Five tools ask a person first, through MCP elicitation: `create_client`,
+  `update_client`, `enable_client`, `delete_client` and
+  `generate_one_time_link`. Only one of them destroys anything — the others are
+  on the list because `destructiveHint` is the wrong axis for what they do. A
+  new client is a credential that reaches every network behind the VPN,
+  `update_client` can widen `serverAllowedIps`, and `enable_client` re-arms a key
+  pair that is already installed on a peer.
+- The approval is bound to the exact edit, so approving a rename does not license
+  a later call that widens the routes.
+- `disable_client` deliberately stays ungated: it only ever withdraws access, and
+  making the safe move the slow one would be the wrong trade.
+- Client names, addresses and the instance's own strings are marked as untrusted
+  data, and oversized output is truncated with the omission stated.
+- `WG_EASY_READ_ONLY=true` registers the read tools and nothing else.
+
+## Documentation
+
+The full guide, tool reference and security notes live at
+**[wg-easy-mcp.ni-c.de](https://wg-easy-mcp.ni-c.de)** (source in [`docs/`](docs/)).
+
 ## Development
 
 ```bash
@@ -294,6 +367,28 @@ The release workflow runs the test suite, publishes to npm (via [trusted publish
 
 `server.json` lists both an npm and an OCI package; the registry job syncs the version into both before publishing. If it ever fails, fix `main` and re-run `mcp-registry.yml` via `workflow_dispatch` — re-running the tag job checks out the old tree.
 
+## Releasing
+
+Releases are tag-driven. Bump `package.json`, move the `[Unreleased]` notes in
+`CHANGELOG.md` under the new version, commit, then:
+
+```sh
+git tag -s vX.Y.Z -m "vX.Y.Z"
+git push origin main vX.Y.Z
+```
+
+The release workflow publishes to npm via Trusted Publishing (OIDC, with
+provenance), pushes the multi-arch container image to GHCR, creates the GitHub
+release from the CHANGELOG section, and updates the entry in the official MCP
+registry.
+
+## Contributing
+
+Issues, discussions and pull requests are welcome — see
+[CONTRIBUTING.md](CONTRIBUTING.md). For vulnerabilities please use
+[private reporting](https://github.com/ni-c/wg-easy-mcp/security/advisories/new)
+rather than a public issue; the policy is in [SECURITY.md](SECURITY.md).
+
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE) © Willi Thiel
