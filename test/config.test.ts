@@ -93,6 +93,37 @@ describe('loadConfig', () => {
     expect(config.insecureTls).toBe(true);
   });
 
+  it.each(['true', 'TRUE', ' true ', '1', 'yes', 'Yes'])(
+    'reads WG_EASY_READ_ONLY=%j as on',
+    (value) => {
+      // Read-only is the switch that fails towards the restriction, so every
+      // spelling an operator plausibly writes into a compose file has to close
+      // it. Silently leaving the write tools registered because someone wrote
+      // `1` is the one outcome that cannot be allowed here.
+      expect(loadConfig(env({ WG_EASY_READ_ONLY: value })).readOnly).toBe(true);
+    }
+  );
+
+  it.each(['false', '', 'no', '0', 'off'])(
+    'reads WG_EASY_READ_ONLY=%j as off',
+    (value) => {
+      expect(loadConfig(env({ WG_EASY_READ_ONLY: value })).readOnly).toBe(
+        false
+      );
+    }
+  );
+
+  it('leaves WG_EASY_INSECURE_TLS strict, unlike read-only', () => {
+    // The opposite direction: a typo here would relax certificate validation,
+    // so only the exact string counts.
+    for (const value of ['1', 'yes', 'TRUE', ' true ']) {
+      expect(
+        loadConfig(env({ WG_EASY_INSECURE_TLS: value })).insecureTls,
+        value
+      ).toBe(false);
+    }
+  });
+
   it('removes the credentials from the environment after loading', () => {
     const environment = env();
     loadConfig(environment);

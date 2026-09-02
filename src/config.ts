@@ -90,7 +90,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const username = env.WG_EASY_USERNAME;
   const password = env.WG_EASY_PASSWORD;
   const insecureTls = env.WG_EASY_INSECURE_TLS === 'true';
-  const readOnly = env.WG_EASY_READ_ONLY === 'true';
+  // Deliberately more forgiving than `WG_EASY_INSECURE_TLS` above, and the
+  // asymmetry is the safety argument, not an oversight: a misspelt value here
+  // fails *towards* the restriction, so `WG_EASY_READ_ONLY=1` in a compose file
+  // must not silently unlock the write tools. The insecure-TLS switch fails the
+  // other way, so it keeps the exact-match rule.
+  const readOnly = /^(1|true|yes)$/i.test(env.WG_EASY_READ_ONLY?.trim() ?? '');
   const allowTools = env.WG_EASY_ALLOW_TOOLS;
   const denyTools = env.WG_EASY_DENY_TOOLS;
 
