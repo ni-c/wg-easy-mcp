@@ -238,6 +238,14 @@ true})` has always raised the dialog; `enable_client` did the same state
   argument used to keep such a test green while the guard it names went
   unreached.
 
+- stdio is served through `serveStdio`, so the connection's era is negotiated
+  on the opening exchange rather than assumed. A client that pins the
+  `2026-07-28` era is served it; until now its `server/discover` probe was
+  answered with "Method not found" and only `2025-11-25` was on offer. A client
+  that speaks the older era sees no change — it is still pinned to one instance
+  for the life of the connection, exactly as a hand-wired
+  `StdioServerTransport` served it.
+
 ### Fixed
 
 - An entry in `WG_EASY_ALLOW_TOOLS` that is not tool-name-shaped is now
