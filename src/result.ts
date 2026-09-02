@@ -119,8 +119,17 @@ function budget(
     const slot = longestString(copy);
     if (slot === undefined || slot.value.length === 0) break;
     const keep = Math.floor(slot.value.length / 2);
-    (slot.container as Record<string | number, unknown>)[slot.key] =
-      `${slot.value.slice(0, keep)}… (${slot.value.length - keep} more characters omitted)`;
+    const shortened = `${slot.value.slice(0, keep)}… (${slot.value.length - keep} more characters omitted)`;
+    // Only when it really is shorter. The note that explains the cut is about
+    // thirty characters, so "shortening" a string near that length *lengthens*
+    // it — and since this pass always picks the longest string, it would pick
+    // the same slot again, write something longer again, and never stop. An
+    // answer of five thousand short names is exactly that shape, and it grew
+    // rather than shrank. If the longest string cannot be shortened profitably
+    // then no shorter one can either, so the pass is finished; what is left is
+    // a payload made of many small pieces, which is the array pass's problem.
+    if (shortened.length >= slot.value.length) break;
+    (slot.container as Record<string | number, unknown>)[slot.key] = shortened;
     cut[slot.path] = {
       shown: keep,
       total: cut[slot.path]?.total ?? slot.value.length,

@@ -1316,4 +1316,69 @@ describe('untrusted upstream data', () => {
 
     expect(resultText(result)).not.toContain('truncated');
   });
+
+  it('drops list entries once no single string is the problem', async () => {
+    // The second pass, and the case that showed the first one could not
+    // terminate. Two thousand ordinary records: every string in them is a
+    // handful of characters, and the note explaining a cut is about thirty, so
+    // "shortening" one of these names *lengthens* it. The string pass picks the
+    // longest string each round, so it kept picking the one it had just made
+    // longer — the answer grew from 97 kB to 133 kB and the loop never
+    // returned. It now stops as soon as a cut would not be a cut, and the
+    // entries are what gets dropped.
+    stubFetch(() =>
+      jsonResponse(
+        Array.from({ length: 2000 }, (_, index) => ({
+          id: index,
+          name: `c${index}`,
+          address: `10.8.0.${index % 255}`,
+        }))
+      )
+    );
+    const client = await connect();
+
+    const result = (await client.callTool({
+      name: 'list_clients',
+      arguments: {},
+    })) as CallToolResult;
+
+    const payload = resultJson(result) as {
+      count: number;
+      clients: unknown[];
+      truncated?: { fields: Record<string, { shown: number; total: number }> };
+    };
+    expect(payload.clients.length).toBeLessThan(2000);
+    expect(payload.truncated?.fields.clients).toEqual({
+      shown: payload.clients.length,
+      total: 2000,
+    });
+    // `count` is what the instance reported, not what survived the budget: a
+    // caller that saw 2000 shrink to 500 needs to know which of the two it has.
+    expect(payload.count).toBe(2000);
+  });
+
+  it('answers with an error when nothing is left to cut', async () => {
+    // Both passes exhausted: several thousand short fields, no single string
+    // worth shortening and no list to thin. The alternative was an envelope of
+    // a shape the tool never declared, which the SDK would reject against the
+    // schema — so the caller would be told the server is broken rather than
+    // that the answer does not fit.
+    stubFetch(() =>
+      jsonResponse(
+        Object.fromEntries([
+          ['id', 1],
+          ...Array.from({ length: 6000 }, (_, index) => [`f${index}`, 'x']),
+        ])
+      )
+    );
+    const client = await connect();
+
+    const result = (await client.callTool({
+      name: 'get_client',
+      arguments: { clientId: 1 },
+    })) as CallToolResult;
+
+    expect(result.isError).toBe(true);
+    expect(resultText(result)).toContain('result budget');
+  });
 });
