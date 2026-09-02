@@ -30,24 +30,35 @@ VPN itself.
 
 ## Guard rails in the server
 
-### Four tools ask a person
+### Five tools ask a person
 
-`create_client`, `update_client`, `delete_client` and `generate_one_time_link`
-put the question to a **person** before they act, through MCP elicitation — a
-dialog the model cannot answer on its behalf, and which nothing proceeds without.
+`create_client`, `update_client`, `enable_client`, `delete_client` and
+`generate_one_time_link` put the question to a **person** before they act,
+through MCP elicitation — a dialog the model cannot answer on its behalf, and
+which nothing proceeds without.
 
-Only one of the four destroys anything. The other three are on the list because
+Only one of the five destroys anything. The other four are on the list because
 `destructiveHint` is the wrong axis for what they do:
 
 - `create_client` issues a credential that reaches every network behind the VPN.
 - `update_client` can move an address or widen `serverAllowedIps`. Its approval
   is bound to the **exact edit**, so approving a rename does not license a later
   call that widens the routes.
+- `enable_client` re-arms a key pair that is already installed on a peer. If
+  `disable_client` is the reversible revocation this server recommends — and its
+  catalogue says it is — then enabling is the undo of a revocation. It was
+  ungated until 0.5.0, which also made the guard on `update_client` avoidable:
+  `update_client({enabled: true})` asked and `enable_client` did not, so the
+  same state change was guarded or not depending on which tool the model picked.
 - `generate_one_time_link` mints a URL that hands out a client's full
   configuration — private key included — to anyone who has it, without
   authentication.
 
-Where the client cannot show a dialog, all four fall back to a random 128-bit
+`disable_client` deliberately stays ungated. It only ever withdraws access, and
+putting a dialog between an operator and cutting off a peer is the wrong place
+for one.
+
+Where the client cannot show a dialog, all five fall back to a random 128-bit
 token bound to the same target and valid for **five minutes**; only a second call
 carrying that exact token acts. A boolean would not do: a model can set one by
 itself on the first call, including when it has been steered there by text it
@@ -85,10 +96,75 @@ outlives any decision to stop using it.
 The filter is applied to both, rather than to the one endpoint that happens to
 carry the key today.
 
+One-time links are redacted on the read path too. `GET /api/client` carries the
+link token on every row, and `GET /cnf/<token>` returns the whole configuration
+with **no login at all** — so `list_clients` used to hand out a working download
+URL for any client whose link had not yet expired. The token is replaced;
+`expiresAt` is not, because knowing that a link is live is exactly what a
+listing is for.
+
 Note the deliberate asymmetry: `get_client_config` and `get_client_qrcode`
-return private keys **unredacted**, because handing a peer its configuration is
-the point of those tools. Their descriptions say so. The difference is that
-somebody asked for it.
+return private keys **unredacted**, and `generate_one_time_link` returns the
+link token, because handing a peer its configuration is the point of those
+tools. Their descriptions say so. The difference is that somebody asked for it.
+
+### Read-only mode suppresses key disclosure
+
+`WG_EASY_READ_ONLY=true` registers `list_clients`, `get_client` and
+`get_server_info`, and nothing else.
+
+`get_client_config` and `get_client_qrcode` are reads — nothing on the instance
+changes — and they are **not** in that set, because what they read is a client's
+`PrivateKey` in the clear. Read-only mode is the one coarse switch an operator
+has for putting this server in front of a less trusted session, and a mode that
+leaves key disclosure standing is not the mode its name promises: `list_clients`
+followed by `get_client_config` yields one ready-to-use VPN configuration per
+peer, in the transcript, with no confirmation anywhere.
+
+They are left out of `WG_EASY_ALLOW_TOOLS=essential` for the same reason. Where
+a session should also hand out configurations, name the tool:
+
+```
+WG_EASY_ALLOW_TOOLS=essential,get_client_config
+```
+
+This is the rule the catalogue already applies to `delete_client` — the variant
+that cannot be taken back has to be named explicitly — applied to disclosure
+rather than to destruction. Before 0.5.0 both tools counted as read tools, so
+`WG_EASY_READ_ONLY` changed nothing about them.
+
+### The two-call token proves binding, not freshness
+
+Where a client cannot show a dialog, a guarded tool hands back a `confirm_token`
+and acts only on a second call carrying it. Where a client _can_, the reply
+comes back sealed (HMAC) and carries the resource key of the operation it
+answered.
+
+Both mechanisms bind an answer to **one operation with one set of arguments**.
+Neither proves that the answer is _recent_. A sealed `requestState` that opens
+onto the same operation opens onto it whenever it is replayed, and the library
+says so.
+
+In this server that gap is closed by the surroundings rather than by a
+mechanism, and it is worth writing down which surroundings, because they are
+what a future change could remove:
+
+- The sealing key is 32 random bytes **per process**. This is a stdio server
+  spawned per session, so a state sealed in one session cannot be opened in the
+  next.
+- `requestState` only travels over the wire on protocol revision `2026-07-28`.
+  On `2025-11-25` the SDK bridges the elicitation server-side and the value never
+  leaves the process. This server offers neither revision explicitly: it does not
+  set `supportedProtocolVersions`, so it takes the SDK's default list, which ends
+  at `2025-11-25`.
+- The `confirm_token` path is single-use by construction — `ConfirmationStore`
+  consumes the token — and expires after five minutes.
+
+So there is nothing here to replay, and **no replay defence has been built**. If
+this server ever negotiates `2026-07-28`, or serves two halves of one flow from
+two processes with a shared key, this section stops being true and a nonce is
+needed. That applies first to `create_client` and `generate_one_time_link`,
+whose approvals are the ones worth stealing.
 
 ### Upstream content is marked untrusted
 

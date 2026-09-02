@@ -1,7 +1,7 @@
 # Asking a person
 
-Four of the eleven tools change who can reach the network behind this VPN. All
-four **ask a person first**.
+Five of the eleven tools change who can reach the network behind this VPN. All
+five **ask a person first**.
 
 Not a `confirm: true` argument the model can set. Not a token the model reads out
 of its own previous result. A dialog, raised through [MCP
@@ -22,13 +22,14 @@ answer comes back, nothing happens.
 | ------------------------ | ----------------------------------- |
 | `create_client`          | always                              |
 | `update_client`          | always, bound to the **exact edit** |
+| `enable_client`          | always                              |
 | `delete_client`          | always                              |
 | `generate_one_time_link` | always                              |
 | everything else          | never                               |
 
-Only one of the four destroys anything, and that is the whole reason this page
+Only one of the five destroys anything, and that is the whole reason this page
 exists next to the annotations. `destructiveHint` is the wrong axis for the other
-three:
+four:
 
 - `create_client` issues a credential that reaches every network this VPN
   reaches. Deleting it later does not undo a connection it made in the meantime.
@@ -40,9 +41,20 @@ three:
   authentication. Its own annotation had said “which is why the tool is guarded
   instead” since it was written, and it was not.
 
-`enable_client` and `disable_client` are deliberately not on the list: they are
-each other's undo, and a dialog in front of a reversible state change is how
-people learn to tick without reading.
+- `enable_client` re-arms a key pair that is already installed on a peer, so
+  nothing further has to be handed over for that peer to connect. It was not on
+  this list until 0.5.0, on the argument that it and `disable_client` are each
+  other's undo and a dialog in front of a reversible state change teaches people
+  to tick without reading. That argument does not survive the pairing being
+  asymmetric: `disable_client` withdraws access and `enable_client` grants it,
+  and only one of those two directions is worth a question. It also left the
+  guard on `update_client` avoidable — `update_client({enabled: true})` asked
+  and `enable_client` did not — while `WG_EASY_ALLOW_TOOLS=essential` registered
+  only the ungated one.
+
+`disable_client` is deliberately not on the list, and is the only write tool
+that is not: it can only ever withdraw access, and an operator cutting a peer
+off should not have to answer a dialog to do it.
 
 ## What the dialog contains
 

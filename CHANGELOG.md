@@ -9,7 +9,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **`enable_client` now asks a person.** `update_client({clientId, enabled:
+true})` has always raised the dialog; `enable_client` did the same state
+  change with a bare POST. Whether re-arming a peer was guarded came down to
+  which of the two tools the model reached for — and under the recommended
+  `WG_EASY_ALLOW_TOOLS=essential`, only the ungated one was registered at all.
+
+  It is not on the list because it destroys something. The key pair it re-arms
+  is already installed on the peer, so nothing further has to be handed over for
+  that peer to reach every network behind the VPN. This server's own catalogue
+  calls `disable_client` the recommended reversible revocation; the undo of a
+  revocation cannot be the cheaper call. `disable_client` stays ungated, and is
+  now the only write tool that never asks: it can only withdraw access.
+
+- **`WG_EASY_READ_ONLY` no longer leaves key disclosure standing.**
+  `get_client_config` and `get_client_qrcode` return a client's `PrivateKey` in
+  the clear. Both counted as read tools, so the one coarse switch an operator
+  has for putting this server in front of a less trusted session changed nothing
+  about them: `list_clients` followed by `get_client_config` yields one
+  ready-to-use VPN configuration per peer, in the transcript, unconfirmed.
+
+  They are still reads, and their `readOnlyHint: true` is unchanged and honest —
+  nothing on the instance changes. What changed is which set they are in.
+  Read-only mode now registers `list_clients`, `get_client` and
+  `get_server_info` only, and the two are out of `essential` as well. Where a
+  session should also hand out configurations, name the tool:
+  `WG_EASY_ALLOW_TOOLS=essential,get_client_config`. That is the rule the
+  catalogue already applied to `delete_client` — the variant that cannot be
+  taken back has to be named — applied to disclosure rather than destruction.
+
+  The essential preset is six tools now, not eight.
+
+- **A live one-time link is no longer handed out by `list_clients`.** wg-easy
+  puts the link token on every row of `GET /api/client`, and `GET /cnf/<token>`
+  returns the whole configuration — private key included — with **no login at
+  all**. So an ungated read tool that survives read-only mode was returning a
+  working, unauthenticated download URL for every client whose link had not yet
+  expired. The token is now redacted like other key material; `expiresAt` is
+  not, because knowing that a link is live is what a listing is for.
+  `generate_one_time_link` still returns the value, deliberately: somebody
+  approved it.
+
 ### Fixed
+
+- **`generate_one_time_link` reported failure on every successful call.** It
+  minted the link and then read it back with `GET /api/client/{id}` — but
+  wg-easy joins the one-time link onto the client row in its list query and not
+  in its single-client query, so that read answers `oneTimeLink: null` for a
+  client that has a live link. The tool then said "the link value was not
+  returned by the API", and its own description explained that away as wg-easy
+  15.4.0 answering HTTP 500.
+
+  It does not. Against a real 15.4.0 the POST answers `200 {"success":true}`,
+  the row is written, and `GET /cnf/<token>` serves the peer's configuration
+  unauthenticated for five minutes. The tool now reads the list, returns the
+  link with its `expiresAt` — and where the read-back itself fails, says the
+  link **was created** and points at the UI where it can be revoked, instead of
+  returning a bare transport error a model reads as "nothing happened". The
+  integration suite now fetches the minted URL with no credentials and asserts
+  it hands back the private key.
+
+- **`clientId` is no longer `Number()`.** `z.coerce.number()` accepted anything
+  `Number()` accepts: `{clientId: true}` addressed client 1, `{clientId: ["3"]}`
+  addressed client 3. It now takes an integer or a decimal string and rejects
+  the rest.
+
+- `WG_EASY_READ_ONLY` accepts `1`, `true` and `yes`, trimmed and
+  case-insensitively, where it used to require the exact string `true`. It is
+  the switch that fails _towards_ the restriction, so `WG_EASY_READ_ONLY=1`
+  silently leaving the write tools registered is the one outcome it must not
+  have. `WG_EASY_INSECURE_TLS` keeps the exact-match rule for the same reason
+  read the other way round: a typo there fails towards relaxed certificates.
+
+- `docs/guide/faq.md` said read-only mode was not possible ("Not today … this
+  server registers all eleven tools unconditionally"). `WG_EASY_READ_ONLY` has
+  existed since 0.4.0, and the stale answer was wrong in the unsafe direction.
 
 - **`get_client` no longer returns the client's WireGuard private key.**
   wg-easy's single-client endpoint carries `privateKey` and `preSharedKey` in
@@ -79,6 +155,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The startup log now also reports `WG_EASY_READ_ONLY`, which it never did, and
   `missingConfigMessage` names the four optional variables it used to omit.
 - A `docs/guide/approval.md` page.
+- `SECURITY.md` and the security guide now say what the confirmation **proves**:
+  binding to one operation with one set of arguments, not freshness. No replay
+  defence is built, because the sealing key is per process, the two-call token
+  is single-use, and `requestState` only crosses the wire on protocol revision
+  `2026-07-28`, which this server does not offer — it takes the SDK's default
+  list, which ends at `2025-11-25`. The section names what would have to change
+  for that to stop being true.
 
 - Runs on **MCP SDK 2.0**. The wire protocol is unchanged for existing clients:
   the server negotiates the same revision it always did, and a client that
@@ -94,6 +177,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **`svg-asset-set`** rather than from copies kept in this repository — 719
   fewer lines here, and one place to fix each of them. All three have no runtime
   dependencies of their own.
+- The shared libraries move to `mcp-approval` 0.7.1, `mcp-tool-allowlist` 0.2.1,
+  `mcp-internal-hosts` 0.2.1, `mcp-integration-harness` 0.2.0 and
+  `svg-asset-set` 0.2.0. The harness change is visible in the suite: where a
+  security path asserted only that a call failed, it now has to say **why** —
+  `expectError: true` is also satisfied by a schema rejection, so a renamed
+  argument used to keep such a test green while the guard it names went
+  unreached.
 
 ### Fixed
 

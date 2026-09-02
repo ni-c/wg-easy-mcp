@@ -116,6 +116,29 @@ describe('tool registration', () => {
     }
   });
 
+  it('guards every tool that can grant or restore VPN access', async () => {
+    // Written as the whole set rather than tool by tool, because the finding
+    // was a hole between two tools: `update_client({enabled: true})` asked and
+    // `enable_client` did not, so the guard was avoidable by picking the other
+    // name for the same state change. A per-tool test cannot see that; a set
+    // can. `confirm_token` in the schema is the observable half of the guard —
+    // no tool has it without going through `requestApproval`.
+    stubFetch(() => jsonResponse({}));
+    const client = await connect();
+    const { tools } = await client.listTools();
+    const guarded = tools
+      .filter((tool) => 'confirm_token' in (tool.inputSchema.properties ?? {}))
+      .map((tool) => tool.name)
+      .sort();
+    expect(guarded).toEqual([
+      'create_client',
+      'delete_client',
+      'enable_client',
+      'generate_one_time_link',
+      'update_client',
+    ]);
+  });
+
   it('does not call the key-handing reads destructive either', async () => {
     // get_client_config and get_client_qrcode return a private key. They are
     // still reads — readOnlyHint is about the server's state, not about how
@@ -676,23 +699,132 @@ describe('error handling', () => {
   });
 });
 
-describe('enable_client / disable_client', () => {
-  it.each(['enable', 'disable'] as const)(
-    'posts to the %s endpoint',
-    async (action) => {
-      const calls = stubFetch(() => jsonResponse({ success: true }));
+describe('the clientId argument', () => {
+  it('takes the decimal string a client may send instead of a number', async () => {
+    const calls = stubFetch(() => jsonResponse({ id: 7 }));
+    const client = await connect();
+
+    await client.callTool({ name: 'get_client', arguments: { clientId: '7' } });
+
+    expect(calls[0]?.url).toBe('http://wg.test:51821/api/client/7');
+  });
+
+  it.each([true, ['3'], '0', '007x', 1.5])(
+    'refuses %j rather than reinterpreting it as a client',
+    async (value) => {
+      // `z.coerce.number()` is `Number()`: `Number(true)` is 1 and
+      // `Number(['3'])` is 3, so `{clientId: true}` addressed the first client
+      // on the instance. On a VPN a silently reinterpreted target is worse
+      // than a rejected call.
+      const calls = stubFetch(() => jsonResponse({ id: 1 }));
       const client = await connect();
 
       const result = (await client.callTool({
-        name: `${action}_client`,
-        arguments: { clientId: 7 },
+        name: 'get_client',
+        arguments: { clientId: value },
       })) as CallToolResult;
 
-      expect(result.isError).toBeUndefined();
-      expect(calls[0]?.url).toBe(`http://wg.test:51821/api/client/7/${action}`);
-      expect(calls[0]?.init?.method).toBe('POST');
+      expect(result.isError).toBe(true);
+      expect(resultText(result)).toContain('clientId');
+      expect(calls).toHaveLength(0);
     }
   );
+});
+
+describe('disable_client', () => {
+  it('posts to the disable endpoint without asking', async () => {
+    // Ungated on purpose: it only ever withdraws access, and an operator
+    // cutting a peer off should not have to answer a dialog to do it.
+    const calls = stubFetch(() => jsonResponse({ success: true }));
+    const client = await connect();
+
+    const result = (await client.callTool({
+      name: 'disable_client',
+      arguments: { clientId: 7 },
+    })) as CallToolResult;
+
+    expect(result.isError).toBeUndefined();
+    expect(calls[0]?.url).toBe('http://wg.test:51821/api/client/7/disable');
+    expect(calls[0]?.init?.method).toBe('POST');
+  });
+});
+
+describe('enable_client', () => {
+  it('enables nothing on the first call and hands back a token', async () => {
+    // The finding this covers: `update_client({enabled: true})` asked a
+    // person and `enable_client` did not, so the guard on that state change
+    // came down to which of the two tools the model happened to pick.
+    const calls = stubFetch(() => jsonResponse({ id: 7, name: 'carol' }));
+    const client = await connect();
+
+    const first = (await client.callTool({
+      name: 'enable_client',
+      arguments: { clientId: 7 },
+    })) as CallToolResult;
+
+    expect(resultText(first)).toContain('confirm_token=');
+    expect(calls.some((c) => c.url.endsWith('/enable'))).toBe(false);
+
+    const second = (await client.callTool({
+      name: 'enable_client',
+      arguments: { clientId: 7, confirm_token: tokenOf(first) },
+    })) as CallToolResult;
+
+    expect(second.isError).toBeUndefined();
+    expect(calls.find((c) => c.url.endsWith('/enable'))?.url).toBe(
+      'http://wg.test:51821/api/client/7/enable'
+    );
+  });
+
+  it('names what re-arming the key pair means, on the client', async () => {
+    stubFetch(() => jsonResponse({ id: 7, name: 'carol' }));
+    const client = await connect({}, 'accept');
+    const { prompts } = client;
+
+    await client.callTool({
+      name: 'enable_client',
+      arguments: { clientId: 7 },
+    });
+
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain('can reach every network this VPN reaches');
+    expect(prompts[0]).toMatch(/^ {2}Client: carol$/m);
+  });
+
+  it('enables nothing when the person declines', async () => {
+    const calls = stubFetch(() => jsonResponse({ id: 7, name: 'carol' }));
+    const client = await connect({}, 'decline');
+
+    const result = (await client.callTool({
+      name: 'enable_client',
+      arguments: { clientId: 7 },
+    })) as CallToolResult;
+
+    expect(result.isError).toBe(true);
+    expect(resultText(result)).toContain('enable_client did nothing');
+    expect(calls.some((c) => c.url.endsWith('/enable'))).toBe(false);
+  });
+
+  it('does not accept a token issued for another client', async () => {
+    // The key is the client id, so approving one peer must not re-arm a
+    // different one.
+    const calls = stubFetch(() => jsonResponse({ id: 7, name: 'carol' }));
+    const client = await connect();
+
+    const first = (await client.callTool({
+      name: 'enable_client',
+      arguments: { clientId: 7 },
+    })) as CallToolResult;
+
+    const result = (await client.callTool({
+      name: 'enable_client',
+      arguments: { clientId: 8, confirm_token: tokenOf(first) },
+    })) as CallToolResult;
+
+    expect(result.isError).toBe(true);
+    expect(resultText(result)).toContain('issued for different arguments');
+    expect(calls.some((c) => c.url.endsWith('/enable'))).toBe(false);
+  });
 });
 
 describe('get_client_qrcode', () => {
@@ -711,12 +843,36 @@ describe('get_client_qrcode', () => {
 });
 
 describe('generate_one_time_link', () => {
-  it('generates a link and returns it with the download path', async () => {
-    const calls = stubFetch((url, init) =>
-      init?.method === 'POST'
-        ? jsonResponse({ success: true })
-        : jsonResponse({ id: 4, oneTimeLink: { oneTimeLink: 'tok123' } })
-    );
+  it('reads the link back from the list, which is the only place it appears', async () => {
+    // **A finding, corrected here.** wg-easy joins the one-time link onto the
+    // client row in `findMany` and not in `findById`, so
+    // `GET /api/client/{id}` answers `oneTimeLink: null` for a client that has
+    // a live link. This tool read the single client and therefore said "the
+    // link value was not returned by the API" on every successful call — and
+    // the description explained that away as wg-easy answering HTTP 500. It
+    // does not: against 15.4.0 the POST answers 200, the row is written, and
+    // `GET /cnf/<token>` serves the whole configuration unauthenticated.
+    //
+    // So the stub answers the two endpoints differently, exactly as the
+    // instance does. Against the old code this test fails with "not in the
+    // client list", which is the finding.
+    const calls = stubFetch((url, init) => {
+      if (init?.method === 'POST') return jsonResponse({ success: true });
+      if (url.endsWith('/api/client')) {
+        return jsonResponse([
+          { id: 3, name: 'other', oneTimeLink: { oneTimeLink: 'wrong' } },
+          {
+            id: 4,
+            name: 'carol',
+            oneTimeLink: {
+              oneTimeLink: 'tok123',
+              expiresAt: '2026-09-02T10:37:28.777Z',
+            },
+          },
+        ]);
+      }
+      return jsonResponse({ id: 4, name: 'carol', oneTimeLink: null });
+    });
     const client = await connect({}, 'accept');
 
     const result = (await client.callTool({
@@ -731,14 +887,17 @@ describe('generate_one_time_link', () => {
       success: true,
       oneTimeLink: 'tok123',
       path: '/cnf/tok123',
+      expiresAt: '2026-09-02T10:37:28.777Z',
     });
   });
 
-  it('reports success without a link when the API does not return one', async () => {
+  it('accepts the older shape where the link is a bare string', async () => {
     stubFetch((url, init) =>
       init?.method === 'POST'
         ? jsonResponse({ success: true })
-        : jsonResponse({ id: 4, oneTimeLink: null })
+        : url.endsWith('/api/client')
+          ? jsonResponse([{ id: 4, oneTimeLink: 'tok123' }])
+          : jsonResponse({ id: 4, name: 'carol' })
     );
     const client = await connect({}, 'accept');
 
@@ -747,7 +906,70 @@ describe('generate_one_time_link', () => {
       arguments: { clientId: 4 },
     })) as CallToolResult;
 
-    expect(resultText(result)).toContain('not returned');
+    expect(resultJson(result)).toEqual({
+      success: true,
+      oneTimeLink: 'tok123',
+      path: '/cnf/tok123',
+      expiresAt: null,
+    });
+  });
+
+  it('says the link exists even when its value is missing from the list', async () => {
+    // The wording matters more than it looks: "generated, but not returned"
+    // reads like nothing happened. Something did — an unauthenticated URL is
+    // live — and the only thing the reader can act on is the UI.
+    stubFetch((url, init) =>
+      init?.method === 'POST'
+        ? jsonResponse({ success: true })
+        : url.endsWith('/api/client')
+          ? jsonResponse([{ id: 4, oneTimeLink: null }])
+          : jsonResponse({ id: 4, name: 'carol' })
+    );
+    const client = await connect({}, 'accept');
+
+    const result = (await client.callTool({
+      name: 'generate_one_time_link',
+      arguments: { clientId: 4 },
+    })) as CallToolResult;
+
+    const text = resultText(result);
+    expect(text).toContain('was created');
+    expect(text).toContain('revoke it if it was not intended');
+  });
+
+  it('says the link exists when only the read-back fails', async () => {
+    // The mint and the read-back are two requests, and the second one can
+    // fail on its own. Letting that reach `run()` produced a bare "the GET
+    // failed" — a model reads that as "no link was made" while an
+    // unauthenticated URL serving the full configuration, private key
+    // included, is live on the instance. There is no way to withdraw it from
+    // here, so the answer has to say it happened.
+    let seenPost = false;
+    stubFetch((url, init) => {
+      if (init?.method === 'POST' && url.endsWith('/generateOneTimeLink')) {
+        seenPost = true;
+        return jsonResponse({ success: true });
+      }
+      // The dialog's own read of the client name comes first and must still
+      // work; only the read-back after the POST fails.
+      return seenPost
+        ? jsonResponse({ message: 'gateway timeout' }, 504)
+        : jsonResponse({ id: 4, name: 'carol' });
+    });
+    const client = await connect({}, 'accept');
+
+    const result = (await client.callTool({
+      name: 'generate_one_time_link',
+      arguments: { clientId: 4 },
+    })) as CallToolResult;
+
+    const text = resultText(result);
+    expect(text).toContain('was created');
+    expect(text).toContain('revoke the link if it was not intended');
+    expect(text).toContain('HTTP 504');
+    // Not an error result: reporting a failure would say the opposite of what
+    // happened on the instance.
+    expect(result.isError).toBeUndefined();
   });
 });
 
@@ -829,6 +1051,58 @@ describe('get_server_info', () => {
 
     expect(one.privateKey).toBe('[redacted]');
     expect(one.preSharedKey).toBe('[redacted]');
+  });
+
+  it('redacts a live one-time link but keeps the fact that one exists', async () => {
+    // Found while checking what `generate_one_time_link` actually does.
+    // `GET /api/client` carries the one-time-link token on every row, and
+    // `GET /cnf/<token>` returns the whole configuration — private key
+    // included — with no login at all. So `list_clients`, a read tool that
+    // survives `WG_EASY_READ_ONLY` and needs no confirmation, handed out a
+    // working download URL for every client whose link had not yet expired.
+    //
+    // The expiry stays: knowing a link is live is exactly what an operator
+    // wants from a listing. Carrying the credential is not.
+    stubFetch(() =>
+      jsonResponse([
+        {
+          id: 1,
+          name: 'laptop',
+          oneTimeLink: {
+            id: 1,
+            oneTimeLink: 'e9c8395',
+            expiresAt: '2026-09-02T10:41:13.571Z',
+          },
+        },
+      ])
+    );
+    const client = await connect();
+
+    const listed = resultJson(
+      (await client.callTool({
+        name: 'list_clients',
+        arguments: {},
+      })) as CallToolResult
+    ) as Record<string, Record<string, unknown>>[];
+
+    expect(listed[0]!.oneTimeLink!.oneTimeLink).toBe('[redacted]');
+    expect(listed[0]!.oneTimeLink!.expiresAt).toBe('2026-09-02T10:41:13.571Z');
+  });
+
+  it('leaves a client without a link alone', async () => {
+    // `oneTimeLink: null` is the common case and must not become the string
+    // "[redacted]", which would read as a link that is there.
+    stubFetch(() => jsonResponse([{ id: 1, oneTimeLink: null }]));
+    const client = await connect();
+
+    const listed = resultJson(
+      (await client.callTool({
+        name: 'list_clients',
+        arguments: {},
+      })) as CallToolResult
+    ) as Record<string, unknown>[];
+
+    expect(listed[0]!.oneTimeLink).toBeNull();
   });
 
   it('redacts secret fields from admin responses', async () => {

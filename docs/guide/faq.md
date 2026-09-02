@@ -28,14 +28,24 @@ give the wg-easy container egress.
 
 ## Can I make it read-only?
 
-Not today. wg-easy has no read-only account, and this server registers all eleven
-tools unconditionally. What you can do:
+Yes, since 0.4.0: `WG_EASY_READ_ONLY=true` registers `list_clients`,
+`get_client` and `get_server_info`, and nothing else. wg-easy itself still has no
+read-only account, so this is enforced by the server, not by the credentials —
+anything that can read the process environment still holds VPN admin.
+
+Note that `get_client_config` and `get_client_qrcode` are **not** in that set,
+although both are reads. What they read is a client's private key in the clear,
+and a read-only mode that leaves key disclosure standing is not the mode its
+name promises. They are out of `WG_EASY_ALLOW_TOOLS=essential` for the same
+reason; name them where a session should also hand out configurations.
+
+Beyond the switch:
 
 - use an MCP client that asks before running non-read-only tools — the tools
   carry `readOnlyHint`, `destructiveHint` and `idempotentHint` annotations for
   exactly this,
-- rely on the four tools that [ask a person](/guide/approval) —
-  `create_client`, `update_client`, `delete_client` and
+- rely on the five tools that [ask a person](/guide/approval) —
+  `create_client`, `update_client`, `enable_client`, `delete_client` and
   `generate_one_time_link` — which no single call can bypass.
 
 ## Why did `update_client` not change the field I asked for?

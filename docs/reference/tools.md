@@ -2,7 +2,7 @@
 
 All eleven are registered unless you say otherwise. `WG_EASY_ALLOW_TOOLS` and
 `WG_EASY_DENY_TOOLS` narrow the list to the ones you want, and `essential` selects a
-curated eight — see
+curated six — see
 [choosing the tools that load](/guide/configuration#choosing-the-tools-that-load).
 
 Eleven tools, all against the wg-easy v15 REST API. Every payload that comes back
@@ -15,10 +15,10 @@ described in [Security](/guide/security).
 | `get_client`             | `readOnlyHint`    | One client in full                          |
 | `create_client`          | —                 | Create a client                             |
 | `update_client`          | —                 | Change selected fields of a client          |
-| `enable_client`          | `idempotentHint`  | Let a client connect again                  |
+| `enable_client`          | `idempotentHint`  | Let a client connect again — two-step       |
 | `disable_client`         | `idempotentHint`  | Block a client, keeping its config          |
 | `delete_client`          | `destructiveHint` | Delete a client — two-step                  |
-| `get_client_config`      | `readOnlyHint`    | The client's `.conf` file                   |
+| `get_client_config`      | `readOnlyHint`    | The client's `.conf` file — hands out a key |
 | `get_client_qrcode`      | `readOnlyHint`    | The client config as an SVG QR code         |
 | `generate_one_time_link` | —                 | A shareable one-time config download link   |
 | `get_server_info`        | `readOnlyHint`    | Release, settings and interface config      |
@@ -77,9 +77,27 @@ which run as root on the wg-easy host — are dropped and can never be set here.
 
 ## enable_client / disable_client
 
-Both take only `clientId`. A disabled client keeps its configuration and keys but
-cannot connect, which makes `disable_client` the reversible alternative to
-deleting.
+A disabled client keeps its configuration and keys but cannot connect, which
+makes `disable_client` the reversible alternative to deleting. It takes only
+`clientId` and asks nobody: it can only ever withdraw access.
+
+`enable_client` is the undo of that revocation, so since 0.5.0 it asks a person
+first and takes `confirm_token` on the fallback path, exactly like
+`delete_client` below. The key pair it re-arms is already installed on the peer,
+so nothing further has to be handed over for that peer to reach every network
+behind the VPN.
+
+| Argument        | Type             | Required | Description                                |
+| --------------- | ---------------- | -------- | ------------------------------------------ |
+| `clientId`      | positive integer | yes      | Which client                               |
+| `confirm_token` | string           | no       | `enable_client` only, on the fallback path |
+
+::: warning enable_client was ungated before 0.5.0
+`update_client({clientId, enabled: true})` has always asked. `enable_client` did
+not, so the same state change was guarded or not depending on which of the two
+tools was called — and under `WG_EASY_ALLOW_TOOLS=essential` only the ungated
+one was registered.
+:::
 
 ## delete_client
 
@@ -124,12 +142,25 @@ encodes the same private key and deserves the same handling.
 ## generate_one_time_link
 
 Generates a link that lets someone download a client configuration **once,
-without authenticating**, so it can be sent to the end user. Requires
-`WG_ENABLE_ONE_TIME_LINKS` on the wg-easy instance.
+without authenticating**, so it can be sent to the end user. The link expires
+after five minutes.
 
-Returns the link value and its path (`/cnf/<link>`). Anyone who has the URL
-before the intended recipient does gets the config, so share it over a channel
-you trust.
+Returns the link value, its path (`/cnf/<link>`) and `expiresAt`. Anyone who has
+the URL before the intended recipient does gets the config, so share it over a
+channel you trust.
+
+::: warning A failed read-back does not mean no link was made
+The tool mints the link and then reads it back. If the read-back fails, the
+answer says the link **was created** and points at the wg-easy UI, where it can
+be revoked. Before 0.5.0 the read-back used `GET /api/client/{id}`, which does
+not carry the link — wg-easy joins it onto the client row in the list query only
+— so every successful call reported "the link value was not returned by the
+API" while a working, unauthenticated download URL was live.
+:::
+
+The link token is redacted from `list_clients` and `get_client`, which would
+otherwise hand it out as a bearer credential; `expiresAt` is not, so a listing
+still shows that a link is live.
 
 ## get_server_info
 

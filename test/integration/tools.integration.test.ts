@@ -150,14 +150,43 @@ describe('a client through its whole life', () => {
     expect(listed[0]!.enabled).toBe(true);
   });
 
-  it('reports honestly when the one-time link cannot be produced', async () => {
-    // **A finding.** `POST /api/client/{id}/generateOneTimeLink` answers 500
-    // on wg-easy 15.4.0 — verified with curl, outside this server. The tool
-    // does not pretend otherwise: it says the link value was not returned and
-    // points at the UI, which is the right shape for an upstream failure.
-    // When wg-easy fixes it, this assertion is what should fail.
-    const link = await asking.call('generate_one_time_link', { clientId });
-    expect(link).toContain('not returned by the API');
+  it('mints a link that really downloads the configuration, unauthenticated', async () => {
+    // **A finding, and the previous reading of it was wrong.** This assertion
+    // used to be `toContain('not returned by the API')`, explained by a
+    // comment saying wg-easy 15.4.0 answers HTTP 500 here. It does not: the
+    // POST answers 200 and writes the row. What is true is that wg-easy joins
+    // the link onto the client in `findMany` only — so the single-client read
+    // this tool used answered `null`, and the server reported a failure while
+    // an unauthenticated download URL was live for five minutes.
+    //
+    // Only a real instance can settle that, which is why the check is here and
+    // not in the stubbed suite: the link is fetched with **no credentials at
+    // all** and has to hand back the peer's private key.
+    const text = await asking.call('generate_one_time_link', { clientId });
+    const { oneTimeLink, path } = parse<{
+      oneTimeLink: string;
+      path: string;
+    }>(text);
+    expect(oneTimeLink).toMatch(/^[0-9a-f]+$/);
+    expect(path).toBe(`/cnf/${oneTimeLink}`);
+
+    const anonymous = await fetch(`${sandbox.url}${path}`, {
+      signal: AbortSignal.timeout(15_000),
+    });
+    expect(anonymous.status).toBe(200);
+    expect(await anonymous.text()).toContain('PrivateKey');
+  });
+
+  it('does not put that link into list_clients', async () => {
+    // The same token, seen from the read side. `list_clients` is ungated, is
+    // in the essential preset and survives `WG_EASY_READ_ONLY`, and wg-easy
+    // puts the one-time link on every row of `GET /api/client` — so the read
+    // path used to hand out the download URL the test above just used.
+    const listed = parse<{ oneTimeLink?: { oneTimeLink?: string } | null }[]>(
+      await asking.call('list_clients')
+    );
+    const row = listed.find((entry) => entry.oneTimeLink != null);
+    expect(row?.oneTimeLink?.oneTimeLink).toBe('[redacted]');
   });
 
   it('names the client in the dialog, not just its id', async () => {
@@ -194,11 +223,14 @@ describe('the fallback path for a client with no dialog', () => {
     });
     const token = tokenOf(refusal);
 
-    // A token issued for one client must not delete another.
+    // A token issued for one client must not delete another. Naming the
+    // reason rather than passing a bare `true`: `expectError: true` is also
+    // satisfied by a schema rejection, so a renamed argument would keep this
+    // green while the guard it is about is never reached.
     await plain.call(
       'delete_client',
       { clientId, confirm_token: token },
-      { expectError: true }
+      { expectError: 'was issued for different arguments' }
     );
     await plain.call('get_client', { clientId });
 

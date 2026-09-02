@@ -17,10 +17,24 @@ import {
 import type { WgEasyApi } from '../api.js';
 import { READ_ONLY } from './annotations.js';
 
-const clientId = z.coerce
-  .number()
-  .int()
-  .positive()
+/**
+ * A client id, as a number or as the decimal string a client may send instead.
+ *
+ * Spelled out rather than left to `z.coerce.number()`, which is `Number()` and
+ * therefore accepts far more than a number: `Number(true)` is `1` and
+ * `Number(['3'])` is `3`, so `{clientId: true}` used to address the first
+ * client on the instance. Nothing legitimate sends those, and on a VPN a
+ * silently reinterpreted target is the wrong kind of forgiving.
+ */
+const clientId = z
+  .union([
+    z.number().int().positive(),
+    z
+      .string()
+      .regex(/^\d+$/)
+      .transform(Number)
+      .refine((value) => value > 0),
+  ])
   .describe('Numeric ID of the client (see list_clients)');
 
 const confirmToken = z
@@ -61,6 +75,17 @@ const UPDATABLE_FIELDS = [
   'serverEndpoint',
   'dns',
 ] as const;
+
+/**
+ * A client row as far as `generate_one_time_link` cares about it.
+ *
+ * `oneTimeLink` is a joined row on wg-easy 15 and a bare string on older
+ * builds, so both shapes are accepted.
+ */
+interface OneTimeLinkClient {
+  id?: number;
+  oneTimeLink?: { oneTimeLink?: string; expiresAt?: string } | string | null;
+}
 
 /** The display name of a client, for the caller-supplied lines of a prompt. */
 async function clientName(api: WgEasyApi, id: number): Promise<string> {
@@ -332,23 +357,61 @@ export function registerClientTools(
     'enable_client',
     {
       title: 'Enable WireGuard client',
-      description: 'Enable a WireGuard client so it can connect again.',
-      inputSchema: z.object({ clientId }),
+      description:
+        'Enable a WireGuard client so it can connect again. Asks a person first; where the client cannot show a dialog, call once to receive a token and again with it.',
+      inputSchema: z.object({ clientId, confirm_token: confirmToken }),
       annotations: {
-        // Restores access rather than removing it.
+        // Restores access rather than removing it, so nothing here is
+        // destructive.
+        //
+        // Guarded all the same, for `create_client`'s reason rather than
+        // `delete_client`'s: this re-arms a credential that is already
+        // installed on a peer and reaches every network behind the VPN. If
+        // `disable_client` is the reversible revocation this server recommends
+        // — and its own catalogue says it is — then enabling is the undo of a
+        // revocation, and the undo cannot be the cheaper call. Leaving it
+        // ungated also made the guard on `update_client({enabled: true})`
+        // avoidable by picking the other tool for the same state change.
         readOnlyHint: false,
         destructiveHint: false,
         idempotentHint: true,
         openWorldHint: false,
       },
     },
-    ({ clientId }) =>
-      run(async () =>
-        upstreamJsonResult(
+    async ({ clientId, confirm_token }, mcp) =>
+      run(async () => {
+        const outcome = await approval.requestApproval(
+          server,
+          mcp,
+          confirmations,
+          {
+            what: `enable WireGuard client ${clientId}`,
+            consequence:
+              'This client’s existing key pair can reach every network this ' +
+              'VPN reaches again. The configuration is already installed on ' +
+              'the peer, so nothing further has to be handed over for it to ' +
+              'connect.',
+            resourceKey: setResourceKey('enable_client', [String(clientId)]),
+            token: confirm_token,
+            details: [
+              { label: 'Client', value: await clientName(api, clientId) },
+            ],
+            toolName: 'enable_client',
+            title: `Enable client ${clientId}?`,
+            hint: 'Tick to enable it, leave it to cancel.',
+          }
+        );
+        if (outcome.decision === 'rejected') return errorResult(outcome.reason);
+        if (outcome.decision === 'declined') {
+          return errorResult('The user declined. enable_client did nothing.');
+        }
+        if (outcome.decision === 'pending') return outcome.result;
+
+        return upstreamJsonResult(
           redactSecrets(await api.post(`/api/client/${clientId}/enable`)),
           'Re-read the client with get_client.'
-        )
-      )
+        );
+      })
   );
 
   server.registerTool(
@@ -361,6 +424,11 @@ export function registerClientTools(
       annotations: {
         // Not destructive: the client and its keys stay, only the tunnel stops.
         // enable_client puts it back.
+        //
+        // Ungated on purpose, and the asymmetry with enable_client is the
+        // point: this one only ever withdraws access. Making the safe half of
+        // a revoke/restore pair ask a person would put a dialog between an
+        // operator and cutting off a peer they have just decided to cut off.
         readOnlyHint: false,
         destructiveHint: false,
         idempotentHint: true,
@@ -471,17 +539,15 @@ export function registerClientTools(
       title: 'Generate one-time config link',
       description:
         'Generate a one-time download link for a client configuration that can ' +
-        'be shared with the end user. Requires WG_ENABLE_ONE_TIME_LINKS to be ' +
-        'enabled on the wg-easy instance. SENSITIVE: anyone with the link can ' +
+        'be shared with the end user. SENSITIVE: anyone with the link can ' +
         'download the full client configuration without authentication — share ' +
-        'it only with the intended user. Asks a person first; where the client ' +
-        'cannot show a dialog, call once to receive a token and again with ' +
-        'it.\n\n' +
-        'On wg-easy 15.4.0 the upstream endpoint answers HTTP 500 and no link ' +
-        'is produced. This tool reports that rather than inventing one, so a ' +
-        'result saying the link value was not returned is wg-easy failing, not ' +
-        'a bad argument — nothing to retry differently. Send the configuration ' +
-        'itself with get_client_config instead.',
+        'it only with the intended user. The link expires after five minutes. ' +
+        'Asks a person first; where the client cannot show a dialog, call once ' +
+        'to receive a token and again with it.\n\n' +
+        'If the answer says the link value could not be read back, the link ' +
+        'still exists on the instance and is downloadable by anyone who has ' +
+        'the URL. Say so rather than reporting that nothing happened, and ' +
+        'point at the wg-easy UI, where it can be revoked.',
       inputSchema: z.object({ clientId, confirm_token: confirmToken }),
       annotations: {
         // Destroys nothing, and that is the whole difficulty with this one: it
@@ -529,20 +595,59 @@ export function registerClientTools(
         if (outcome.decision === 'pending') return outcome.result;
 
         await api.post(`/api/client/${clientId}/generateOneTimeLink`);
-        const client = (await api.get(`/api/client/${clientId}`)) as {
-          oneTimeLink?: { oneTimeLink?: string } | string | null;
-        };
-        const link =
-          typeof client.oneTimeLink === 'string'
-            ? client.oneTimeLink
-            : client.oneTimeLink?.oneTimeLink;
+
+        // Past this point the link exists on the instance, whatever happens
+        // below. The read-back is a second request and can fail on its own —
+        // and if that failure were allowed to reach `run()`, the answer would
+        // be a bare transport error saying only that a GET failed. A model
+        // reads that as "no link was made" while an unauthenticated URL
+        // serving the full configuration, private key included, is live for
+        // the next five minutes. Report the mint first, then the failure.
+        let clients: OneTimeLinkClient[];
+        try {
+          // The **list**, not `/api/client/{id}`. wg-easy joins the one-time
+          // link onto the client row in `findMany` and not in `findById`, so
+          // the single-client read answers `oneTimeLink: null` for a client
+          // that has a live link — verified against 15.4.0. Reading the single
+          // client here is what made this tool report "the link value was not
+          // returned by the API" on every successful call, and what the tool's
+          // own description used to explain as wg-easy answering HTTP 500. It
+          // does not: the POST answers 200 and the link works.
+          clients = (await api.get('/api/client')) as OneTimeLinkClient[];
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          return textResult(
+            `The one-time link for client ${clientId} was created, but reading ` +
+              `it back failed: ${message}. The link exists on the instance ` +
+              'even though its value is not available here. Check the wg-easy ' +
+              'UI and revoke the link if it was not intended.'
+          );
+        }
+        const found = Array.isArray(clients)
+          ? clients.find((entry) => entry?.id === clientId)
+          : undefined;
+        // Accepts both shapes: 15.4.0 nests the value in a joined row, older
+        // builds put the string on the client directly.
+        const record = found?.oneTimeLink;
+        const link = typeof record === 'string' ? record : record?.oneTimeLink;
+        const expiresAt =
+          typeof record === 'string' ? null : (record?.expiresAt ?? null);
         if (!link) {
           return textResult(
-            'One-time link generated, but the link value was not returned by the API. Check the wg-easy UI.'
+            `The one-time link for client ${clientId} was created, but its ` +
+              'value was not in the client list. The link exists on the ' +
+              'instance and can be downloaded by anyone who has the URL. ' +
+              'Check the wg-easy UI and revoke it if it was not intended.'
           );
         }
         return upstreamJsonResult(
-          { success: true, oneTimeLink: link, path: `/cnf/${link}` },
+          {
+            success: true,
+            oneTimeLink: link,
+            path: `/cnf/${link}`,
+            expiresAt,
+          },
           'Re-read the client with get_client.'
         );
       })
