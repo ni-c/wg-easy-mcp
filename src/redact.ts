@@ -20,9 +20,28 @@ const SENSITIVE_KEYS = new Set([
   'sessionsecret',
 ]);
 
-function isSensitiveKey(key: string): boolean {
+/**
+ * Keys that are a secret only when they hold the secret *itself*.
+ *
+ * `oneTimeLink` is both a joined object — `{ oneTimeLink, expiresAt, … }` — and,
+ * one level down, the token that URL is made of. The token is a bearer
+ * credential: `GET /cnf/<token>` returns the client's whole configuration,
+ * private key included, with no login at all. wg-easy puts it on every row of
+ * `GET /api/client`, so `list_clients` — a read tool, ungated, alive under
+ * `WG_EASY_READ_ONLY` — used to hand out a working download URL for any client
+ * whose link had not yet expired.
+ *
+ * Only the string is replaced, so the surrounding row still says that a link is
+ * live and when it lapses. Reporting that is useful; carrying the token is not.
+ * `generate_one_time_link` reads the API's answer before this filter runs,
+ * because handing over the link is what somebody just approved.
+ */
+const SENSITIVE_STRING_KEYS = new Set(['onetimelink']);
+
+function isSensitiveKey(key: string, value: unknown): boolean {
   const lower = key.toLowerCase();
-  return SENSITIVE_KEYS.has(lower) || lower.startsWith('totp');
+  if (SENSITIVE_KEYS.has(lower) || lower.startsWith('totp')) return true;
+  return typeof value === 'string' && SENSITIVE_STRING_KEYS.has(lower);
 }
 
 export function redactSecrets(value: unknown): unknown {
@@ -32,7 +51,9 @@ export function redactSecrets(value: unknown): unknown {
   if (value !== null && typeof value === 'object') {
     const redacted: Record<string, unknown> = {};
     for (const [key, entry] of Object.entries(value)) {
-      redacted[key] = isSensitiveKey(key) ? '[redacted]' : redactSecrets(entry);
+      redacted[key] = isSensitiveKey(key, entry)
+        ? '[redacted]'
+        : redactSecrets(entry);
     }
     return redacted;
   }
