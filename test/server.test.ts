@@ -97,6 +97,46 @@ describe('tool registration', () => {
     expect(byName.get('list_clients')?.annotations?.readOnlyHint).toBe(true);
   });
 
+  it('declares an output schema on every tool', async () => {
+    // The same argument as the annotations below, one field along. A tool that
+    // says nothing about its result forces a client to parse prose to find out
+    // what it got, and the SDK sends no `structuredContent` at all for a tool
+    // that declared no schema — so the machine-readable half does not exist
+    // until this is here.
+    stubFetch(() => jsonResponse({}));
+    const client = await connect();
+    const { tools } = await client.listTools();
+    expect(tools.length).toBeGreaterThan(0);
+    for (const tool of tools) {
+      expect(tool.outputSchema, tool.name).toBeDefined();
+      // An object root, not merely a schema. SEP-2106 allows an array or a
+      // scalar, but a 2025-era client is served that same tool with the schema
+      // rewritten to `{result: …}` — so the tool would answer in two different
+      // shapes depending on who asked. That is why list_clients answers
+      // `{count, clients}` and get_client_config `{configuration}`.
+      expect(tool.outputSchema?.type, tool.name).toBe('object');
+    }
+  });
+
+  it('marks every result built from wg-easy content as untrusted', async () => {
+    // The marker has to survive into the structured channel, or a client that
+    // reads only `structuredContent` — which is the point of declaring a schema
+    // at all — gets free-form client names with no framing whatsoever.
+    stubFetch(() => jsonResponse({}));
+    const client = await connect();
+    const { tools } = await client.listTools();
+    const plain = tools
+      .filter((tool) => {
+        const properties = tool.outputSchema?.properties as
+          Record<string, unknown> | undefined;
+        return properties?.untrusted === undefined;
+      })
+      .map((tool) => tool.name);
+    // delete_client is the only one: it reports an id this server was given,
+    // and nothing that came back from the instance.
+    expect(plain).toEqual(['delete_client']);
+  });
+
   it('declares all four annotation hints on every tool', async () => {
     // Not a style rule. Two of the four default to a *stronger* claim than
     // silence suggests: the specification gives destructiveHint and
@@ -195,7 +235,15 @@ describe('list_clients', () => {
     expect(headers.Authorization).toBe(
       'Basic ' + Buffer.from('admin:secret').toString('base64')
     );
-    expect(resultJson(result)).toEqual(clients);
+    // Wrapped rather than the bare array wg-easy sends: an output schema with
+    // a non-object root is served to a 2025-era client as `{result: …}`, so the
+    // tool would answer in two shapes depending on who asked.
+    expect(resultJson(result)).toEqual({
+      untrusted: true,
+      source: 'wg-easy',
+      count: 1,
+      clients,
+    });
   });
 
   it('passes filter and sort as query parameters', async () => {
@@ -224,7 +272,12 @@ describe('get_client', () => {
     })) as CallToolResult;
 
     expect(calls[0]?.url).toBe('http://wg.test:51821/api/client/2');
-    expect(resultJson(result)).toEqual({ id: 2, name: 'phone' });
+    expect(resultJson(result)).toEqual({
+      untrusted: true,
+      source: 'wg-easy',
+      id: 2,
+      name: 'phone',
+    });
   });
 });
 
@@ -651,7 +704,15 @@ describe('get_client_config', () => {
       arguments: { clientId: 1 },
     })) as CallToolResult;
 
-    expect(resultText(result)).toContain(conf);
+    // In a field, not as the whole result: a scalar root has the same two-shape
+    // problem as an array one, and a `.conf` is a payload a reader should be
+    // able to find by name.
+    expect(resultJson(result)).toEqual({
+      untrusted: true,
+      source: 'wg-easy',
+      configuration: conf,
+    });
+    expect(resultText(result)).toContain('[untrusted data]');
   });
 });
 
@@ -861,7 +922,11 @@ describe('get_client_qrcode', () => {
       arguments: { clientId: 1 },
     })) as CallToolResult;
 
-    expect(resultText(result)).toContain(svg);
+    expect(resultJson(result)).toEqual({
+      untrusted: true,
+      source: 'wg-easy',
+      svg,
+    });
   });
 });
 
@@ -907,7 +972,9 @@ describe('generate_one_time_link', () => {
       'http://wg.test:51821/api/client/4/generateOneTimeLink'
     );
     expect(resultJson(result)).toEqual({
-      success: true,
+      untrusted: true,
+      source: 'wg-easy',
+      created: true,
       oneTimeLink: 'tok123',
       path: '/cnf/tok123',
       expiresAt: '2026-09-02T10:37:28.777Z',
@@ -930,7 +997,9 @@ describe('generate_one_time_link', () => {
     })) as CallToolResult;
 
     expect(resultJson(result)).toEqual({
-      success: true,
+      untrusted: true,
+      source: 'wg-easy',
+      created: true,
       oneTimeLink: 'tok123',
       path: '/cnf/tok123',
       expiresAt: null,
@@ -1039,12 +1108,13 @@ describe('get_server_info', () => {
     );
     const client = await connect();
 
-    const listed = resultJson(
+    const listed_ = resultJson(
       (await client.callTool({
         name: 'list_clients',
         arguments: {},
       })) as CallToolResult
-    ) as unknown as Record<string, unknown>[];
+    ) as { clients: Record<string, unknown>[] };
+    const listed = listed_.clients;
 
     expect(listed[0]!.privateKey).toBe('[redacted]');
     expect(listed[0]!.preSharedKey).toBe('[redacted]');
@@ -1101,12 +1171,13 @@ describe('get_server_info', () => {
     );
     const client = await connect();
 
-    const listed = resultJson(
+    const listed_ = resultJson(
       (await client.callTool({
         name: 'list_clients',
         arguments: {},
       })) as CallToolResult
-    ) as Record<string, Record<string, unknown>>[];
+    ) as { clients: Record<string, Record<string, unknown>>[] };
+    const listed = listed_.clients;
 
     expect(listed[0]!.oneTimeLink!.oneTimeLink).toBe('[redacted]');
     expect(listed[0]!.oneTimeLink!.expiresAt).toBe('2026-09-02T10:41:13.571Z');
@@ -1118,12 +1189,13 @@ describe('get_server_info', () => {
     stubFetch(() => jsonResponse([{ id: 1, oneTimeLink: null }]));
     const client = await connect();
 
-    const listed = resultJson(
+    const listed_ = resultJson(
       (await client.callTool({
         name: 'list_clients',
         arguments: {},
       })) as CallToolResult
-    ) as Record<string, unknown>[];
+    ) as { clients: Record<string, unknown>[] };
+    const listed = listed_.clients;
 
     expect(listed[0]!.oneTimeLink).toBeNull();
   });
@@ -1210,10 +1282,27 @@ describe('untrusted upstream data', () => {
       arguments: {},
     })) as CallToolResult;
 
-    const text = resultText(result);
-    expect(text.length).toBeLessThan(61_000);
-    expect(text).toContain('(truncated,');
-    expect(text).toContain('get_client');
+    // Trimmed as an object, not as a string. Cutting the serialized JSON at a
+    // byte offset was fine for a text block and impossible for
+    // `structuredContent`, which has to parse — and the two channels carry the
+    // same value.
+    const payload = resultJson(result) as {
+      count: number;
+      clients: unknown[];
+      truncated?: {
+        note: string;
+        fields: Record<string, { shown: number; total: number }>;
+      };
+    };
+    expect(resultText(result).length).toBeLessThan(61_000);
+    // The client survives: the oversized *name* is shortened, rather than the
+    // record it is on being dropped. Dropping the entry would answer "one
+    // client matched, here are none of them", which is a worse answer than the
+    // same client with a shortened name.
+    expect(payload.count).toBe(1);
+    expect(payload.clients).toHaveLength(1);
+    expect(payload.truncated?.fields['clients[0].name']?.total).toBe(100_000);
+    expect(payload.truncated?.note).toContain('get_client');
   });
 
   it('leaves payloads within the budget untouched', async () => {

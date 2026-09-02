@@ -9,6 +9,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Every tool declares an `outputSchema` and answers with `structuredContent`
+  beside the text block. A client no longer has to parse prose to use a result.
+
+  The untrusted-data marker travels with it as `untrusted: true` and
+  `source: "wg-easy"` fields, not only as a sentence in the text: a client that
+  reads the structured half and ignores the text would otherwise receive
+  free-form client names, DNS entries and endpoints with no framing at all, and
+  the framing is the guard. `delete_client` is the only tool without the marker
+  — it reports an id this server was given, not anything the instance sent.
+
+  What wg-easy sends is described with every field optional and unknown fields
+  allowed; only what this server builds is exact. The SDK validates every result
+  against the schema before it goes out, so a stricter shape would turn a
+  wg-easy release that adds a field into a tool that fails outright.
+
+### Changed
+
+- **Three tools answer in a new shape.** `list_clients` returns
+  `{count, clients}` instead of a bare array, `get_client_config` returns
+  `{configuration}` instead of the raw `.conf` text, and `get_client_qrcode`
+  returns `{svg}` instead of the raw markup.
+
+  All three for one reason: an output schema whose root is not an object is
+  served to a 2025-era client rewritten as `{result: …}`, so each of those
+  tools would have answered in two different shapes depending on which protocol
+  revision the client spoke.
+
+- **An oversized answer is shortened as an object, not cut as a string.** The
+  longest text field is shortened first — which is what keeps an over-budget QR
+  code and a client with a 40 kB name usable — then list entries are dropped,
+  and a `truncated` field names each field that was cut with what survived and
+  what was there. Cutting the serialized JSON at a byte offset produced text
+  that no longer parses, which a text block tolerates and `structuredContent`
+  cannot.
+
+  Where neither pass leaves anything to give, the result is now an error rather
+  than a half-answer.
+
+- `generate_one_time_link` reports `created: true` in place of
+  `success: true`, and its two read-back failures answer in that same shape with
+  a `warning` field instead of a bare sentence. The link exists on the instance
+  in all three cases, and answering that in three different shapes is how a
+  reader ends up believing nothing happened.
+
+- `delete_client` answers `{deleted: <id>}` rather than a sentence.
+
+- The two-call `confirm_token` prompt is an error result. The operation was
+  asked for and did not happen, and a tool that declares an output schema may
+  not answer without `structuredContent` unless the result is an error. The
+  text is unchanged and still carries the token.
+
 ### Security
 
 - **`enable_client` now asks a person.** `update_client({clientId, enabled:

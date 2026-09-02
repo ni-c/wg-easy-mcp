@@ -200,6 +200,47 @@ exposed):
 👤 asks a person through MCP elicitation · falls back to a two-call
 `confirm_token` where the client cannot show a dialog.
 
+### Structured output
+
+Every tool declares an `outputSchema` and answers with `structuredContent`
+alongside the text block, so a client can use the result without parsing prose:
+
+```jsonc
+{
+  "untrusted": true,
+  "source": "wg-easy",
+  "count": 2,
+  "clients": [{ "id": 1, "name": "laptop", "enabled": true }],
+}
+```
+
+The `untrusted` marker is a field and not only a sentence in the text, because a
+client that reads the structured half and ignores the text would otherwise get
+free-form client names, DNS entries and endpoints with no framing at all. Every
+tool carries it except `delete_client`, which reports an id this server was
+given and nothing that came back from the instance.
+
+Three answers changed shape to fit, and all three for the same reason: a schema
+whose root is not an object is served to a 2025-era client rewritten as
+`{result: …}`, so the tool would answer differently depending on who asked.
+
+| Tool                | Was              | Is                 |
+| ------------------- | ---------------- | ------------------ |
+| `list_clients`      | a bare array     | `{count, clients}` |
+| `get_client_config` | the `.conf` text | `{configuration}`  |
+| `get_client_qrcode` | the SVG markup   | `{svg}`            |
+
+An oversized answer is now shortened as an **object** rather than cut as a
+string: the longest text field is shortened first, then list entries are
+dropped, and a `truncated` field says what was cut and how much there was. A
+document sliced at a byte offset is not a smaller answer, it is an unparseable
+one — and the two channels have to carry the same value.
+
+What wg-easy sends is described with every field optional and unknown fields
+allowed; only what this server builds is exact. The SDK validates each result
+against its schema before it goes out, so a stricter shape would turn a wg-easy
+release that adds a field into a tool that fails outright.
+
 ### Safety
 
 - **Five tools ask a person, not just the model.** `create_client`,

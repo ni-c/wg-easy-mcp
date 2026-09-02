@@ -9,6 +9,26 @@ Eleven tools, all against the wg-easy v15 REST API. Every payload that comes bac
 from wg-easy carries the untrusted-data marker and the 60 000-character budget
 described in [Security](/guide/security).
 
+Every tool declares an `outputSchema` and answers with `structuredContent` beside
+the text block, so a client can use the result without parsing prose. The marker
+travels with it as `untrusted: true` and `source: "wg-easy"` fields — a client
+that reads the structured half and ignores the text would otherwise get free-form
+client names and endpoints with no framing at all. Only `delete_client` is
+without it: it reports an id this server was given, not anything the instance
+sent back.
+
+Three answers are wrapped in an object rather than being one: `list_clients`
+gives `{count, clients}`, `get_client_config` gives `{configuration}` and
+`get_client_qrcode` gives `{svg}`. A schema whose root is not an object is served
+to a 2025-era client rewritten as `{result: …}`, so those three would otherwise
+answer in two different shapes depending on who asked.
+
+An oversized answer is shortened as an object — longest text field first, then
+list entries — and a `truncated` field says what was cut. What wg-easy sends is
+described with every field optional and unknown fields allowed; the SDK validates
+each result against its schema before it goes out, so a stricter shape would turn
+a wg-easy release that adds a field into a tool that fails outright.
+
 | Tool                     | Annotation        | Summary                                     |
 | ------------------------ | ----------------- | ------------------------------------------- |
 | `list_clients`           | `readOnlyHint`    | All clients, optionally filtered and sorted |

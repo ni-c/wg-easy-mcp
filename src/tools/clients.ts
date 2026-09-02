@@ -6,16 +6,15 @@ import {
 } from 'mcp-approval';
 import { z } from 'zod';
 import { redactSecrets } from '../redact.js';
-import {
-  errorResult,
-  run,
-  textResult,
-  upstreamJsonResult,
-  upstreamTextResult,
-} from '../result.js';
+import { errorResult, jsonResult, run, upstreamResult } from '../result.js';
 
 import type { WgEasyApi } from '../api.js';
 import { READ_ONLY } from './annotations.js';
+import {
+  clientRecord,
+  truncationNote,
+  untrustedFields,
+} from '../output-schema.js';
 
 /**
  * A client id, as a number or as the decimal string a client may send instead.
@@ -87,6 +86,20 @@ interface OneTimeLinkClient {
   oneTimeLink?: { oneTimeLink?: string; expiresAt?: string } | string | null;
 }
 
+/**
+ * The upstream answer as an object, so it can be spread into a result.
+ *
+ * wg-easy answers these endpoints with a client record, but the type says
+ * `unknown` and an output schema is validated before the answer leaves. An
+ * empty object is a result the schema accepts and a reader can see is empty;
+ * spreading a string would produce one numbered key per character.
+ */
+function asRecord(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
 /** The display name of a client, for the caller-supplied lines of a prompt. */
 async function clientName(api: WgEasyApi, id: number): Promise<string> {
   // Also the existence check: a missing client fails here with the API's own
@@ -118,6 +131,12 @@ export function registerClientTools(
           .describe('Sort by name, ascending or descending'),
       }),
       annotations: READ_ONLY,
+      outputSchema: z.object({
+        ...untrustedFields,
+        truncated: truncationNote,
+        count: z.number().int().describe('Clients in this answer.'),
+        clients: z.array(clientRecord),
+      }),
     },
     ({ filter, sort }) =>
       run(async () => {
@@ -125,8 +144,15 @@ export function registerClientTools(
         if (filter) query.set('filter', filter);
         if (sort) query.set('sort', sort);
         const suffix = query.size > 0 ? `?${query.toString()}` : '';
-        return upstreamJsonResult(
-          redactSecrets(await api.get(`/api/client${suffix}`)),
+        // Wrapped in an object rather than answered as the bare array wg-easy
+        // sends. An output schema with a non-object root is rewritten to
+        // `{result: …}` for a 2025-era client, so the tool would answer in two
+        // different shapes depending on who asked. `count` comes with the
+        // wrapper, and is what a truncated answer is read against.
+        const clients = redactSecrets(await api.get(`/api/client${suffix}`));
+        const list = Array.isArray(clients) ? clients : [];
+        return upstreamResult(
+          { count: list.length, clients: list },
           'Narrow the result with the filter argument, or fetch a single client with get_client.'
         );
       })
@@ -146,11 +172,12 @@ export function registerClientTools(
         'those two are for.',
       inputSchema: z.object({ clientId }),
       annotations: READ_ONLY,
+      outputSchema: clientRecord.extend(untrustedFields),
     },
     ({ clientId }) =>
       run(async () =>
-        upstreamJsonResult(
-          redactSecrets(await api.get(`/api/client/${clientId}`)),
+        upstreamResult(
+          asRecord(redactSecrets(await api.get(`/api/client/${clientId}`))),
           'Fetch the configuration file separately with get_client_config.'
         )
       )
@@ -186,6 +213,7 @@ export function registerClientTools(
         idempotentHint: false,
         openWorldHint: false,
       },
+      outputSchema: clientRecord.extend(untrustedFields),
     },
     async ({ name, expiresAt, confirm_token }, mcp) =>
       run(async () => {
@@ -219,12 +247,14 @@ export function registerClientTools(
         }
         if (outcome.decision === 'pending') return outcome.result;
 
-        return upstreamJsonResult(
-          redactSecrets(
-            await api.post('/api/client', {
-              name,
-              expiresAt: expiresAt ?? null,
-            })
+        return upstreamResult(
+          asRecord(
+            redactSecrets(
+              await api.post('/api/client', {
+                name,
+                expiresAt: expiresAt ?? null,
+              })
+            )
           ),
           'Re-read the new client with get_client.'
         );
@@ -293,6 +323,7 @@ export function registerClientTools(
         idempotentHint: true,
         openWorldHint: false,
       },
+      outputSchema: clientRecord.extend(untrustedFields),
     },
     async ({ clientId, confirm_token, ...changes }, mcp) =>
       run(async () => {
@@ -346,8 +377,10 @@ export function registerClientTools(
         for (const [key, value] of Object.entries(changes)) {
           if (value !== undefined) body[key] = value;
         }
-        return upstreamJsonResult(
-          redactSecrets(await api.post(`/api/client/${clientId}`, body)),
+        return upstreamResult(
+          asRecord(
+            redactSecrets(await api.post(`/api/client/${clientId}`, body))
+          ),
           'Re-read the client with get_client.'
         );
       })
@@ -377,6 +410,7 @@ export function registerClientTools(
         idempotentHint: true,
         openWorldHint: false,
       },
+      outputSchema: clientRecord.extend(untrustedFields),
     },
     async ({ clientId, confirm_token }, mcp) =>
       run(async () => {
@@ -407,8 +441,10 @@ export function registerClientTools(
         }
         if (outcome.decision === 'pending') return outcome.result;
 
-        return upstreamJsonResult(
-          redactSecrets(await api.post(`/api/client/${clientId}/enable`)),
+        return upstreamResult(
+          asRecord(
+            redactSecrets(await api.post(`/api/client/${clientId}/enable`))
+          ),
           'Re-read the client with get_client.'
         );
       })
@@ -434,11 +470,14 @@ export function registerClientTools(
         idempotentHint: true,
         openWorldHint: false,
       },
+      outputSchema: clientRecord.extend(untrustedFields),
     },
     ({ clientId }) =>
       run(async () =>
-        upstreamJsonResult(
-          redactSecrets(await api.post(`/api/client/${clientId}/disable`)),
+        upstreamResult(
+          asRecord(
+            redactSecrets(await api.post(`/api/client/${clientId}/disable`))
+          ),
           'Re-read the client with get_client.'
         )
       )
@@ -463,6 +502,9 @@ export function registerClientTools(
         idempotentHint: true,
         openWorldHint: false,
       },
+      outputSchema: z.object({
+        deleted: z.number().int().describe('The id that no longer exists.'),
+      }),
     },
     async ({ clientId, confirm_token }, mcp) =>
       run(async () => {
@@ -493,7 +535,7 @@ export function registerClientTools(
         if (outcome.decision === 'pending') return outcome.result;
 
         await api.delete(`/api/client/${clientId}`);
-        return textResult(`Client ${clientId} deleted.`);
+        return jsonResult({ deleted: clientId });
       })
   );
 
@@ -505,11 +547,25 @@ export function registerClientTools(
         'Get the WireGuard configuration file (wg .conf format) for a client. SENSITIVE: the output contains the client private key — treat it as a secret and do not repeat it unnecessarily.',
       inputSchema: z.object({ clientId }),
       annotations: READ_ONLY,
+      // The file goes in a field rather than being the result. A scalar root is
+      // rewritten to `{result: …}` for a 2025-era client, so the answer would
+      // have two shapes; and a `.conf` is exactly the payload a reader has to
+      // be able to find by name rather than by position.
+      outputSchema: z.object({
+        ...untrustedFields,
+        configuration: z
+          .string()
+          .describe('The wg .conf file. Contains the client private key.'),
+      }),
     },
     ({ clientId }) =>
       run(async () =>
-        upstreamTextResult(
-          String(await api.get(`/api/client/${clientId}/configuration`)),
+        upstreamResult(
+          {
+            configuration: String(
+              await api.get(`/api/client/${clientId}/configuration`)
+            ),
+          },
           'Download the configuration from the wg-easy UI if it was cut off.'
         )
       )
@@ -523,11 +579,15 @@ export function registerClientTools(
         'Get the client configuration as a QR code (SVG markup) for scanning with the WireGuard mobile app. SENSITIVE: the QR code encodes the client private key — treat it as a secret.',
       inputSchema: z.object({ clientId }),
       annotations: READ_ONLY,
+      outputSchema: z.object({
+        ...untrustedFields,
+        svg: z.string().describe('SVG markup. Encodes the client private key.'),
+      }),
     },
     ({ clientId }) =>
       run(async () =>
-        upstreamTextResult(
-          String(await api.get(`/api/client/${clientId}/qrcode.svg`)),
+        upstreamResult(
+          { svg: String(await api.get(`/api/client/${clientId}/qrcode.svg`)) },
           'Use get_client_config instead if the QR code markup was cut off.'
         )
       )
@@ -561,6 +621,27 @@ export function registerClientTools(
         idempotentHint: false,
         openWorldHint: false,
       },
+      // One shape for all three outcomes, and `created` is the field that
+      // matters in every one of them. The link exists on the instance as soon
+      // as the POST returns; whether its value could be read back afterwards is
+      // a second question, and answering the two in two different shapes is how
+      // a reader ends up believing nothing happened.
+      outputSchema: z.object({
+        ...untrustedFields,
+        created: z
+          .literal(true)
+          .describe('The link exists on the instance, whatever else is here.'),
+        oneTimeLink: z.string().optional().describe('The token, if read back.'),
+        path: z.string().optional().describe('Where the token is downloaded.'),
+        expiresAt: z.string().nullable().optional(),
+        warning: z
+          .string()
+          .optional()
+          .describe(
+            'Present when the value could not be read back. The link is live ' +
+              'regardless and can be revoked in the wg-easy UI.'
+          ),
+      }),
     },
     async ({ clientId, confirm_token }, mcp) =>
       run(async () => {
@@ -617,11 +698,16 @@ export function registerClientTools(
         } catch (error) {
           const message =
             error instanceof Error ? error.message : String(error);
-          return textResult(
-            `The one-time link for client ${clientId} was created, but reading ` +
-              `it back failed: ${message}. The link exists on the instance ` +
-              'even though its value is not available here. Check the wg-easy ' +
-              'UI and revoke the link if it was not intended.'
+          return upstreamResult(
+            {
+              created: true,
+              warning:
+                `The one-time link for client ${clientId} was created, but ` +
+                `reading it back failed: ${message}. The link exists on the ` +
+                'instance even though its value is not available here. Check ' +
+                'the wg-easy UI and revoke the link if it was not intended.',
+            },
+            'Read the client list with list_clients.'
           );
         }
         const found = Array.isArray(clients)
@@ -634,16 +720,21 @@ export function registerClientTools(
         const expiresAt =
           typeof record === 'string' ? null : (record?.expiresAt ?? null);
         if (!link) {
-          return textResult(
-            `The one-time link for client ${clientId} was created, but its ` +
-              'value was not in the client list. The link exists on the ' +
-              'instance and can be downloaded by anyone who has the URL. ' +
-              'Check the wg-easy UI and revoke it if it was not intended.'
+          return upstreamResult(
+            {
+              created: true,
+              warning:
+                `The one-time link for client ${clientId} was created, but ` +
+                'its value was not in the client list. The link exists on the ' +
+                'instance and can be downloaded by anyone who has the URL. ' +
+                'Check the wg-easy UI and revoke it if it was not intended.',
+            },
+            'Read the client list with list_clients.'
           );
         }
-        return upstreamJsonResult(
+        return upstreamResult(
           {
-            success: true,
+            created: true,
             oneTimeLink: link,
             path: `/cnf/${link}`,
             expiresAt,

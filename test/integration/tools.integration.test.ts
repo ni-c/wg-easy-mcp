@@ -1,4 +1,5 @@
 import {
+  expectEveryToolDeclaresOutputSchema,
   expectEveryToolExercised,
   startServer,
   toolCoverage,
@@ -42,6 +43,17 @@ function parse<T>(text: string): T {
   return JSON.parse(blank === -1 ? text : text.slice(blank + 2)) as T;
 }
 
+/**
+ * The client list, out of the envelope `list_clients` answers with.
+ *
+ * It used to be the bare array wg-easy sends. An output schema with a
+ * non-object root is served to a 2025-era client as `{result: …}`, so the tool
+ * would have answered in two shapes depending on who asked.
+ */
+async function listClients<T = Client>(harness: LiveHarness): Promise<T[]> {
+  return parse<{ clients: T[] }>(await harness.call('list_clients')).clients;
+}
+
 interface Client {
   /** Numeric, despite the name. */
   id: number;
@@ -74,8 +86,7 @@ describe('the instance', () => {
   });
 
   it('starts with no clients at all', async () => {
-    // A bare array, not wrapped in an object.
-    const listed = parse<Client[]>(await asking.call('list_clients'));
+    const listed = await listClients(asking);
     expect(listed).toHaveLength(0);
   });
 });
@@ -84,9 +95,7 @@ describe('a client through its whole life', () => {
   it('creates one, which generates a real key pair', async () => {
     await asking.call('create_client', { name: 'integration-laptop' });
 
-    const listed = parse<(Client & { privateKey?: string })[]>(
-      await asking.call('list_clients')
-    );
+    const listed = await listClients<Client & { privateKey?: string }>(asking);
     expect(listed).toHaveLength(1);
     clientId = listed[0]!.id;
     expect(listed[0]!.name).toBe('integration-laptop');
@@ -129,11 +138,11 @@ describe('a client through its whole life', () => {
 
   it('disables and re-enables it', async () => {
     await asking.call('disable_client', { clientId });
-    let listed = parse<Client[]>(await asking.call('list_clients'));
+    let listed = await listClients(asking);
     expect(listed[0]!.enabled).toBe(false);
 
     await asking.call('enable_client', { clientId });
-    listed = parse<Client[]>(await asking.call('list_clients'));
+    listed = await listClients(asking);
     expect(listed[0]!.enabled).toBe(true);
   });
 
@@ -145,7 +154,7 @@ describe('a client through its whole life', () => {
       clientId,
       name: 'integration-phone',
     });
-    const listed = parse<Client[]>(await asking.call('list_clients'));
+    const listed = await listClients(asking);
     expect(listed[0]!.name).toBe('integration-phone');
     expect(listed[0]!.enabled).toBe(true);
   });
@@ -182,9 +191,9 @@ describe('a client through its whole life', () => {
     // in the essential preset and survives `WG_EASY_READ_ONLY`, and wg-easy
     // puts the one-time link on every row of `GET /api/client` — so the read
     // path used to hand out the download URL the test above just used.
-    const listed = parse<{ oneTimeLink?: { oneTimeLink?: string } | null }[]>(
-      await asking.call('list_clients')
-    );
+    const listed = await listClients<{
+      oneTimeLink?: { oneTimeLink?: string } | null;
+    }>(asking);
     const row = listed.find((entry) => entry.oneTimeLink != null);
     expect(row?.oneTimeLink?.oneTimeLink).toBe('[redacted]');
   });
@@ -197,30 +206,38 @@ describe('a client through its whole life', () => {
 
 describe('the fallback path for a client with no dialog', () => {
   it('creates only after the token comes back', async () => {
-    const refusal = await plain.call('create_client', {
-      name: 'integration-tablet',
-    });
+    // An error result: the prompt says the client was not created. It has to
+    // be one — a tool that declares an `outputSchema` may not answer without
+    // `structuredContent` unless the result is an error, and a prompt has none
+    // to give.
+    const refusal = await plain.call(
+      'create_client',
+      { name: 'integration-tablet' },
+      { expectError: /confirm_token=/ }
+    );
     expect(refusal).toContain('confirm_token');
     expect(plain.prompts).toHaveLength(0);
     // Nothing yet: the first call is a question.
-    let listed = parse<Client[]>(await plain.call('list_clients'));
+    let listed = await listClients(plain);
     expect(listed).toHaveLength(1);
 
     await plain.call('create_client', {
       name: 'integration-tablet',
       confirm_token: tokenOf(refusal),
     });
-    listed = parse<Client[]>(await plain.call('list_clients'));
+    listed = await listClients(plain);
     expect(listed).toHaveLength(2);
   });
 
   it('deletes only after the token comes back, and refuses a stale one', async () => {
-    const listed = parse<Client[]>(await plain.call('list_clients'));
+    const listed = await listClients(plain);
     const tablet = listed.find((c) => c.name === 'integration-tablet')!;
 
-    const refusal = await plain.call('delete_client', {
-      clientId: tablet.id,
-    });
+    const refusal = await plain.call(
+      'delete_client',
+      { clientId: tablet.id },
+      { expectError: /confirm_token=/ }
+    );
     const token = tokenOf(refusal);
 
     // A token issued for one client must not delete another. Naming the
@@ -238,7 +255,7 @@ describe('the fallback path for a client with no dialog', () => {
       clientId: tablet.id,
       confirm_token: token,
     });
-    const after = parse<Client[]>(await plain.call('list_clients'));
+    const after = await listClients(plain);
     expect(after.map((c) => c.name)).not.toContain('integration-tablet');
   });
 
@@ -251,10 +268,19 @@ describe('the fallback path for a client with no dialog', () => {
 describe('cleaning up', () => {
   it('deletes the client it made', async () => {
     await asking.call('delete_client', { clientId });
-    // A bare array, not wrapped in an object.
-    const listed = parse<Client[]>(await asking.call('list_clients'));
+    const listed = await listClients(asking);
     expect(listed).toHaveLength(0);
   });
+});
+
+it('declares an output schema on every tool', async () => {
+  // The unit suite checks the same thing against a stub. Here it is checked
+  // against the server that has just answered every one of these tools with
+  // real wg-easy data — and each of those answers went through the SDK's
+  // validation against the schema below it, which is the half a stub cannot
+  // prove.
+  const { tools } = await asking.client.listTools();
+  expectEveryToolDeclaresOutputSchema(tools);
 });
 
 it('exercises every tool in the catalogue', () => {

@@ -1,6 +1,6 @@
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 import type { CallToolResult } from '@modelcontextprotocol/client';
-import { vi } from 'vitest';
+import { expect, vi } from 'vitest';
 
 import type { Config } from '../src/config.js';
 import { createServer } from '../src/server.js';
@@ -106,14 +106,36 @@ export function resultText(result: CallToolResult): string {
 }
 
 /**
- * Payloads from the wg-easy API are prefixed with the untrusted-data marker,
- * so strip it before parsing. Asserting the marker is present is the job of
- * the dedicated tests in the suite.
+ * The machine-readable half of a result — and a check that the other half says
+ * the same thing.
+ *
+ * The specification's rule is that `content` and `structuredContent` are the
+ * same information in two presentations, and nothing enforces it: a tool that
+ * builds the two separately can drift between them for a long time before
+ * anybody notices, because each channel looks right to whoever reads only that
+ * one. Every assertion in this suite goes through here, so every one of them
+ * also asserts the two agree.
+ *
+ * Payloads from the wg-easy API are prefixed with the untrusted-data marker in
+ * the text, so that is stripped before parsing. Asserting the marker is present
+ * is the job of the dedicated tests in the suite.
  */
 export function resultJson(result: CallToolResult): unknown {
   const text = resultText(result);
   const start = text.indexOf('\n\n');
-  return JSON.parse(start === -1 ? text : text.slice(start + 2));
+  const fromText: unknown = JSON.parse(
+    start === -1 ? text : text.slice(start + 2)
+  );
+  if (result.structuredContent === undefined) {
+    throw new Error(
+      'the result carried no structuredContent — every tool here declares an ' +
+        `outputSchema, so this one answered wrongly.\nText was: ${text.slice(0, 300)}`
+    );
+  }
+  expect(result.structuredContent, 'structuredContent vs. text').toEqual(
+    fromText
+  );
+  return result.structuredContent;
 }
 
 /** The confirmation token a guarded tool handed back on its first call. */
