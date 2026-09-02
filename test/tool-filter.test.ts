@@ -30,6 +30,7 @@ const base: Config = {
   username: 'admin',
   password: 'secret',
   insecureTls: false,
+  elicitation: true,
   readOnly: false,
   allowTools: undefined,
   denyTools: undefined,

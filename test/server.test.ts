@@ -11,6 +11,29 @@ import {
   tokenOf,
 } from './harness.js';
 
+/**
+ * The slice of `get_server_info` these tests read.
+ *
+ * It replaced a `Record<string, Record<string, string>>` cast, which claimed
+ * the payload was flat and two levels of string. It is neither: `wireguard`
+ * sits a level deeper again, and `sessionTimeout` is a number. The cast
+ * typechecked nothing and was wrong about both.
+ */
+interface ServerInfoJson {
+  information?: { error?: string };
+  general?: {
+    ok?: boolean;
+    session?: { sessionSecret?: string; sessionTimeout?: number };
+    totpSecret?: string;
+  };
+  interface?: {
+    ok?: boolean;
+    privateKey?: string;
+    publicKey?: string;
+    wireguard?: { preSharedKey?: string };
+  };
+}
+
 describe('tool registration', () => {
   it('exposes all expected tools', async () => {
     stubFetch(() => jsonResponse({}));
@@ -988,8 +1011,8 @@ describe('get_server_info', () => {
     })) as CallToolResult;
 
     expect(result.isError).toBeUndefined();
-    const data = resultJson(result) as Record<string, Record<string, string>>;
-    expect(data.information.error).toContain('500');
+    const data = resultJson(result) as ServerInfoJson;
+    expect(data.information?.error).toContain('500');
     expect(data.general).toEqual({ ok: true });
     expect(data.interface).toEqual({ ok: true });
   });
@@ -1125,13 +1148,13 @@ describe('get_server_info', () => {
       arguments: {},
     })) as CallToolResult;
 
-    const data = resultJson(result) as Record<string, Record<string, string>>;
-    expect(data.interface.privateKey).toBe('[redacted]');
-    expect(data.interface.publicKey).toBe('server-public-key');
-    expect(data.interface.wireguard.preSharedKey).toBe('[redacted]');
-    expect(data.general.session.sessionSecret).toBe('[redacted]');
-    expect(data.general.session.sessionTimeout).toBe(3600);
-    expect(data.general.totpSecret).toBe('[redacted]');
+    const data = resultJson(result) as ServerInfoJson;
+    expect(data.interface?.privateKey).toBe('[redacted]');
+    expect(data.interface?.publicKey).toBe('server-public-key');
+    expect(data.interface?.wireguard?.preSharedKey).toBe('[redacted]');
+    expect(data.general?.session?.sessionSecret).toBe('[redacted]');
+    expect(data.general?.session?.sessionTimeout).toBe(3600);
+    expect(data.general?.totpSecret).toBe('[redacted]');
     expect(resultText(result)).not.toContain('server-private-key');
   });
 });
