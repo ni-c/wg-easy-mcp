@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- #region changelog -->
 
-## [Unreleased]
+## [0.5.0] - 2026-09-03
 
 ### Added
 
@@ -25,6 +25,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   allowed; only what this server builds is exact. The SDK validates every result
   against the schema before it goes out, so a stricter shape would turn a
   wg-easy release that adds a field into a tool that fails outright.
+
+- **A person is asked before four operations, not just told about one.** Where
+  the MCP client supports elicitation, `create_client`, `update_client`,
+  `delete_client` and `generate_one_time_link` raise a real dialog that the
+  model cannot answer on its behalf. Where it does not, they fall back to the
+  two-call `confirm_token` — and say which of the two happened rather than
+  implying somebody approved.
+
+  The three new ones are not there because they destroy something.
+  `create_client` issues a credential that reaches every network behind the VPN;
+  `update_client` can move an address or widen `serverAllowedIps`;
+  `generate_one_time_link` mints a URL that hands out a private key without
+  authentication. Its own annotation had said "which is why the tool is guarded
+  instead" since 0.3.0, and it was not.
+
+  The `update_client` approval is bound to the **exact edit**, not to the
+  client: approving a rename does not license a later call that widens the
+  routes.
 
 ### Changed
 
@@ -70,120 +88,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   asked for and did not happen, and a tool that declares an output schema may
   not answer without `structuredContent` unless the result is an error. The
   text is unchanged and still carries the token.
-
-### Security
-
-- **`enable_client` now asks a person.** `update_client({clientId, enabled:
-true})` has always raised the dialog; `enable_client` did the same state
-  change with a bare POST. Whether re-arming a peer was guarded came down to
-  which of the two tools the model reached for — and under the recommended
-  `WG_EASY_ALLOW_TOOLS=essential`, only the ungated one was registered at all.
-
-  It is not on the list because it destroys something. The key pair it re-arms
-  is already installed on the peer, so nothing further has to be handed over for
-  that peer to reach every network behind the VPN. This server's own catalogue
-  calls `disable_client` the recommended reversible revocation; the undo of a
-  revocation cannot be the cheaper call. `disable_client` stays ungated, and is
-  now the only write tool that never asks: it can only withdraw access.
-
-- **`WG_EASY_READ_ONLY` no longer leaves key disclosure standing.**
-  `get_client_config` and `get_client_qrcode` return a client's `PrivateKey` in
-  the clear. Both counted as read tools, so the one coarse switch an operator
-  has for putting this server in front of a less trusted session changed nothing
-  about them: `list_clients` followed by `get_client_config` yields one
-  ready-to-use VPN configuration per peer, in the transcript, unconfirmed.
-
-  They are still reads, and their `readOnlyHint: true` is unchanged and honest —
-  nothing on the instance changes. What changed is which set they are in.
-  Read-only mode now registers `list_clients`, `get_client` and
-  `get_server_info` only, and the two are out of `essential` as well. Where a
-  session should also hand out configurations, name the tool:
-  `WG_EASY_ALLOW_TOOLS=essential,get_client_config`. That is the rule the
-  catalogue already applied to `delete_client` — the variant that cannot be
-  taken back has to be named — applied to disclosure rather than destruction.
-
-  The essential preset is six tools now, not eight.
-
-- **A live one-time link is no longer handed out by `list_clients`.** wg-easy
-  puts the link token on every row of `GET /api/client`, and `GET /cnf/<token>`
-  returns the whole configuration — private key included — with **no login at
-  all**. So an ungated read tool that survives read-only mode was returning a
-  working, unauthenticated download URL for every client whose link had not yet
-  expired. The token is now redacted like other key material; `expiresAt` is
-  not, because knowing that a link is live is what a listing is for.
-  `generate_one_time_link` still returns the value, deliberately: somebody
-  approved it.
-
-### Fixed
-
-- **`generate_one_time_link` reported failure on every successful call.** It
-  minted the link and then read it back with `GET /api/client/{id}` — but
-  wg-easy joins the one-time link onto the client row in its list query and not
-  in its single-client query, so that read answers `oneTimeLink: null` for a
-  client that has a live link. The tool then said "the link value was not
-  returned by the API", and its own description explained that away as wg-easy
-  15.4.0 answering HTTP 500.
-
-  It does not. Against a real 15.4.0 the POST answers `200 {"success":true}`,
-  the row is written, and `GET /cnf/<token>` serves the peer's configuration
-  unauthenticated for five minutes. The tool now reads the list, returns the
-  link with its `expiresAt` — and where the read-back itself fails, says the
-  link **was created** and points at the UI where it can be revoked, instead of
-  returning a bare transport error a model reads as "nothing happened". The
-  integration suite now fetches the minted URL with no credentials and asserts
-  it hands back the private key.
-
-- **`clientId` is no longer `Number()`.** `z.coerce.number()` accepted anything
-  `Number()` accepts: `{clientId: true}` addressed client 1, `{clientId: ["3"]}`
-  addressed client 3. It now takes an integer or a decimal string and rejects
-  the rest.
-
-- `WG_EASY_READ_ONLY` accepts `1`, `true` and `yes`, trimmed and
-  case-insensitively, where it used to require the exact string `true`. It is
-  the switch that fails _towards_ the restriction, so `WG_EASY_READ_ONLY=1`
-  silently leaving the write tools registered is the one outcome it must not
-  have. `WG_EASY_INSECURE_TLS` keeps the exact-match rule for the same reason
-  read the other way round: a typo there fails towards relaxed certificates.
-
-- `docs/guide/faq.md` said read-only mode was not possible ("Not today … this
-  server registers all eleven tools unconditionally"). `WG_EASY_READ_ONLY` has
-  existed since 0.4.0, and the stale answer was wrong in the unsafe direction.
-
-- **`get_client` no longer returns the client's WireGuard private key.**
-  wg-easy's single-client endpoint carries `privateKey` and `preSharedKey` in
-  full, and only `get_server_info` was filtering — so asking about a VPN client
-  put that client's key into the model's context and therefore into the
-  transcript, where it outlives any decision to stop using it.
-
-  `list_clients` does not carry the key on 15.4.0, which is what made this easy
-  to miss; the filter is applied to both anyway rather than to the one endpoint
-  that happens to need it today. `get_client_config` and `get_client_qrcode`
-  still return keys unredacted, deliberately: handing a peer its configuration
-  is what they are for, and somebody asked.
-
-  Found by the new integration suite, against a real wg-easy.
-
-### Added
-
-- **A person is asked before four operations, not just told about one.** Where
-  the MCP client supports elicitation, `create_client`, `update_client`,
-  `delete_client` and `generate_one_time_link` raise a real dialog that the
-  model cannot answer on its behalf. Where it does not, they fall back to the
-  two-call `confirm_token` — and say which of the two happened rather than
-  implying somebody approved.
-
-  The three new ones are not there because they destroy something.
-  `create_client` issues a credential that reaches every network behind the VPN;
-  `update_client` can move an address or widen `serverAllowedIps`;
-  `generate_one_time_link` mints a URL that hands out a private key without
-  authentication. Its own annotation had said "which is why the tool is guarded
-  instead" since 0.3.0, and it was not.
-
-  The `update_client` approval is bound to the **exact edit**, not to the
-  client: approving a rename does not license a later call that widens the
-  routes.
-
-### Changed
 
 - **BREAKING:** the confirmation parameter of `delete_client` is now
   `confirm_token`, not `confirmToken`. A caller that passes the old name gets a
@@ -257,10 +161,100 @@ true})` has always raised the dialog; `enable_client` did the same state
 
 ### Fixed
 
+- **`generate_one_time_link` reported failure on every successful call.** It
+  minted the link and then read it back with `GET /api/client/{id}` — but
+  wg-easy joins the one-time link onto the client row in its list query and not
+  in its single-client query, so that read answers `oneTimeLink: null` for a
+  client that has a live link. The tool then said "the link value was not
+  returned by the API", and its own description explained that away as wg-easy
+  15.4.0 answering HTTP 500.
+
+  It does not. Against a real 15.4.0 the POST answers `200 {"success":true}`,
+  the row is written, and `GET /cnf/<token>` serves the peer's configuration
+  unauthenticated for five minutes. The tool now reads the list, returns the
+  link with its `expiresAt` — and where the read-back itself fails, says the
+  link **was created** and points at the UI where it can be revoked, instead of
+  returning a bare transport error a model reads as "nothing happened". The
+  integration suite now fetches the minted URL with no credentials and asserts
+  it hands back the private key.
+
+- **`clientId` is no longer `Number()`.** `z.coerce.number()` accepted anything
+  `Number()` accepts: `{clientId: true}` addressed client 1, `{clientId: ["3"]}`
+  addressed client 3. It now takes an integer or a decimal string and rejects
+  the rest.
+
+- `WG_EASY_READ_ONLY` accepts `1`, `true` and `yes`, trimmed and
+  case-insensitively, where it used to require the exact string `true`. It is
+  the switch that fails _towards_ the restriction, so `WG_EASY_READ_ONLY=1`
+  silently leaving the write tools registered is the one outcome it must not
+  have. `WG_EASY_INSECURE_TLS` keeps the exact-match rule for the same reason
+  read the other way round: a typo there fails towards relaxed certificates.
+
+- `docs/guide/faq.md` said read-only mode was not possible ("Not today … this
+  server registers all eleven tools unconditionally"). `WG_EASY_READ_ONLY` has
+  existed since 0.4.0, and the stale answer was wrong in the unsafe direction.
+
+- **`get_client` no longer returns the client's WireGuard private key.**
+  wg-easy's single-client endpoint carries `privateKey` and `preSharedKey` in
+  full, and only `get_server_info` was filtering — so asking about a VPN client
+  put that client's key into the model's context and therefore into the
+  transcript, where it outlives any decision to stop using it.
+
+  `list_clients` does not carry the key on 15.4.0, which is what made this easy
+  to miss; the filter is applied to both anyway rather than to the one endpoint
+  that happens to need it today. `get_client_config` and `get_client_qrcode`
+  still return keys unredacted, deliberately: handing a peer its configuration
+  is what they are for, and somebody asked.
+
+  Found by the new integration suite, against a real wg-easy.
+
 - An entry in `WG_EASY_ALLOW_TOOLS` that is not tool-name-shaped is now
   **redacted** in the error rather than quoted back. `WG_EASY_PASSWORD` and
   `WG_EASY_ALLOW_TOOLS` are adjacent lines in every compose file, and a paste
   into the wrong one used to print the credential into the client's log.
+
+### Security
+
+- **`enable_client` now asks a person.** `update_client({clientId, enabled:
+true})` has always raised the dialog; `enable_client` did the same state
+  change with a bare POST. Whether re-arming a peer was guarded came down to
+  which of the two tools the model reached for — and under the recommended
+  `WG_EASY_ALLOW_TOOLS=essential`, only the ungated one was registered at all.
+
+  It is not on the list because it destroys something. The key pair it re-arms
+  is already installed on the peer, so nothing further has to be handed over for
+  that peer to reach every network behind the VPN. This server's own catalogue
+  calls `disable_client` the recommended reversible revocation; the undo of a
+  revocation cannot be the cheaper call. `disable_client` stays ungated, and is
+  now the only write tool that never asks: it can only withdraw access.
+
+- **`WG_EASY_READ_ONLY` no longer leaves key disclosure standing.**
+  `get_client_config` and `get_client_qrcode` return a client's `PrivateKey` in
+  the clear. Both counted as read tools, so the one coarse switch an operator
+  has for putting this server in front of a less trusted session changed nothing
+  about them: `list_clients` followed by `get_client_config` yields one
+  ready-to-use VPN configuration per peer, in the transcript, unconfirmed.
+
+  They are still reads, and their `readOnlyHint: true` is unchanged and honest —
+  nothing on the instance changes. What changed is which set they are in.
+  Read-only mode now registers `list_clients`, `get_client` and
+  `get_server_info` only, and the two are out of `essential` as well. Where a
+  session should also hand out configurations, name the tool:
+  `WG_EASY_ALLOW_TOOLS=essential,get_client_config`. That is the rule the
+  catalogue already applied to `delete_client` — the variant that cannot be
+  taken back has to be named — applied to disclosure rather than destruction.
+
+  The essential preset is six tools now, not eight.
+
+- **A live one-time link is no longer handed out by `list_clients`.** wg-easy
+  puts the link token on every row of `GET /api/client`, and `GET /cnf/<token>`
+  returns the whole configuration — private key included — with **no login at
+  all**. So an ungated read tool that survives read-only mode was returning a
+  working, unauthenticated download URL for every client whose link had not yet
+  expired. The token is now redacted like other key material; `expiresAt` is
+  not, because knowing that a link is live is what a listing is for.
+  `generate_one_time_link` still returns the value, deliberately: somebody
+  approved it.
 
 ## [0.4.0] - 2026-08-27
 
