@@ -1,23 +1,36 @@
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+/**
+ * What this repository still has to prove about its tool filter.
+ *
+ * The filter itself lives in `mcp-tool-allowlist` and is tested there: pattern
+ * syntax, the preset, how a rejected entry is quoted back, the shape of every
+ * message. Repeating that here would test the dependency.
+ *
+ * What only this repository can assert is the wiring — that the catalogue names
+ * exactly the tools the server registers, that the messages name *these*
+ * environment variables, that the gate hangs off `WG_EASY_READ_ONLY`, and that
+ * a filtered tool is really gone rather than merely hidden. Those are the tests
+ * that fail when this server changes, and they are what is left here.
+ */
+import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-
-import type { Config } from '../src/config.js';
-import { createServer } from '../src/server.js';
-import { ToolFilterError } from '../src/tool-filter.js';
 import {
   ALL_TOOLS,
   ESSENTIAL_TOOLS,
+  KEY_TOOLS,
   READ_TOOLS,
   WRITE_TOOLS,
 } from '../src/tools/catalogue.js';
+
+import type { Config } from '../src/config.js';
+import { createServer } from '../src/server.js';
+import { ToolFilterError } from 'mcp-tool-allowlist';
 
 const base: Config = {
   url: 'http://wg.test:51821',
   username: 'admin',
   password: 'secret',
   insecureTls: false,
+  elicitation: true,
   readOnly: false,
   allowTools: undefined,
   denyTools: undefined,
@@ -54,14 +67,55 @@ describe('the catalogue', () => {
     expect(await toolNames()).toEqual([...ALL_TOOLS].sort());
   });
 
-  it('splits into read and write with nothing left over', async () => {
-    expect([...READ_TOOLS, ...WRITE_TOOLS].sort()).toEqual(
+  it('splits into three disjoint lists with nothing left over', async () => {
+    expect([...READ_TOOLS, ...KEY_TOOLS, ...WRITE_TOOLS].sort()).toEqual(
       [...ALL_TOOLS].sort()
     );
-    expect(
-      READ_TOOLS.filter((t) => (WRITE_TOOLS as readonly string[]).includes(t))
-    ).toEqual([]);
+    expect(new Set([...READ_TOOLS, ...KEY_TOOLS, ...WRITE_TOOLS]).size).toEqual(
+      ALL_TOOLS.length
+    );
     expect(await toolNames({ readOnly: true })).toEqual([...READ_TOOLS].sort());
+  });
+
+  it('does not leave key disclosure standing under read-only', async () => {
+    // The finding this pins. `get_client_config` and `get_client_qrcode`
+    // return the client's `PrivateKey` in the clear. They used to count as
+    // read tools — so `WG_EASY_READ_ONLY=true`, the one coarse switch for
+    // putting this server in front of a less trusted session, changed nothing
+    // about them: `list_clients` then `get_client_config` yields one
+    // ready-to-use VPN configuration per peer.
+    //
+    // The two names are written out rather than taken from `KEY_TOOLS`.
+    // Iterating the list under test would make this pass by emptying that list,
+    // which is precisely the change it exists to catch.
+    expect(await toolNames({ readOnly: true })).toEqual([
+      'get_client',
+      'get_server_info',
+      'list_clients',
+    ]);
+  });
+
+  it('does not hand them out with the essential preset either', async () => {
+    // Same rule, other axis: `essential` is the recommendation, so a tool that
+    // discloses a key has to be named rather than arrive with a preset.
+    const essential = await toolNames({ allowTools: 'essential' });
+    expect(essential).not.toContain('get_client_config');
+    expect(essential).not.toContain('get_client_qrcode');
+    expect(essential).not.toContain('generate_one_time_link');
+    // Still composable, which is what makes the removal liveable: a session
+    // that has to hand out a configuration names the tool.
+    expect(
+      await toolNames({ allowTools: 'essential,get_client_config' })
+    ).toContain('get_client_config');
+  });
+
+  it('keeps both key tools reachable when they are named', async () => {
+    // Suppressed by default, not removed. `KEY_TOOLS` is the list of what has
+    // to stay callable under an explicit allow list.
+    for (const tool of KEY_TOOLS) {
+      expect(await toolNames({ allowTools: tool })).toEqual([tool]);
+    }
+    expect(KEY_TOOLS).toHaveLength(2);
   });
 
   it('holds names the env-var syntax cannot misread', () => {
@@ -117,19 +171,6 @@ describe('selecting tools', () => {
     );
   });
 
-  it('trims entries, ignores case and skips empty ones', async () => {
-    expect(
-      await toolNames({ allowTools: ' GET_CLIENT ,, get_client_config, ' })
-    ).toEqual(['get_client', 'get_client_config'].sort());
-  });
-
-  it('treats an empty value as no filter at all', async () => {
-    // `ALLOW_TOOLS=` in a compose file must not mean "allow nothing".
-    expect(await toolNames({ allowTools: '   ' })).toEqual(
-      [...ALL_TOOLS].sort()
-    );
-  });
-
   it('leaves an unconfigured server untouched', async () => {
     expect(await toolNames()).toEqual([...ALL_TOOLS].sort());
   });
@@ -157,16 +198,12 @@ describe('a filtered-out tool', () => {
       server.connect(serverTransport),
       client.connect(clientTransport),
     ]);
-
-    const result = (await client.callTool({
-      name: 'create_client',
-      arguments: {},
-    })) as CallToolResult;
-
-    expect(result.isError).toBe(true);
-    expect(JSON.stringify(result.content)).toContain(
-      'Tool create_client not found'
-    );
+    // SDK v2 reports an unknown tool as a JSON-RPC error rather than as a
+    // result carrying isError. Either way the call fails and nothing reaches
+    // the API, which is what this test is about.
+    await expect(
+      client.callTool({ name: 'create_client', arguments: {} })
+    ).rejects.toThrow('Tool create_client not found');
     expect(calls).toHaveLength(0);
   });
 });
@@ -180,21 +217,6 @@ describe('refusing an unusable list', () => {
     );
     expect(() => createServer(config({ allowTools: 'get_clienz' }))).toThrow(
       /no tool matches "get_clienz".*get_client/s
-    );
-  });
-
-  it('rejects a pattern that matches nothing', () => {
-    expect(() => createServer(config({ allowTools: 'zzz_*' }))).toThrow(
-      /no tool matches "zzz_\*"/
-    );
-  });
-
-  it('rejects a pattern with the star anywhere but last', () => {
-    expect(() => createServer(config({ allowTools: '*_x' }))).toThrow(
-      /single trailing "\*"/
-    );
-    expect(() => createServer(config({ allowTools: 'get_*_x' }))).toThrow(
-      /single trailing "\*"/
     );
   });
 
@@ -259,10 +281,12 @@ describe('together with read-only mode', () => {
 
   it('says read-only is the reason when a pattern leaves nothing at all', () => {
     // The pattern is legal and merely contributes nothing — but if it was the
-    // whole allow list, the empty server needs the real explanation.
+    // whole allow list, the empty server needs the real explanation. What this
+    // repository has to assert is that the explanation names *its* switch:
+    // whether the sentence around it reads well is the library's test.
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     expect(() =>
       createServer(config({ ...readOnly, allowTools: 'create_*' }))
-    ).toThrow(/only write tools, but .*_READ_ONLY is set/);
+    ).toThrow(/read-only mode suppresses.*WG_EASY_READ_ONLY is set/s);
   });
 });

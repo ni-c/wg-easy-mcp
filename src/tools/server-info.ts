@@ -1,39 +1,28 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
+import { z } from 'zod';
 
 import type { WgEasyApi } from '../api.js';
-import { run, upstreamJsonResult } from '../result.js';
-
-const SENSITIVE_KEYS = new Set([
-  'privatekey',
-  'presharedkey',
-  'password',
-  'passwordhash',
-  'sessionsecret',
-]);
-
-function isSensitiveKey(key: string): boolean {
-  const lower = key.toLowerCase();
-  return SENSITIVE_KEYS.has(lower) || lower.startsWith('totp');
-}
+import { READ_ONLY } from './annotations.js';
+import { redactSecrets } from '../redact.js';
+import { run, upstreamResult } from '../result.js';
+import { untrustedFields } from '../output-schema.js';
 
 /**
- * The admin endpoints return the raw server configuration, which depending on
- * the wg-easy version includes the WireGuard server private key and other
- * secrets. Those must never reach the model context.
+ * A section of the answer, or the note saying why it is absent.
+ *
+ * A union rather than an optional field: /api/information fetches the latest
+ * release from GitHub and can fail on its own, and the tool's whole design is
+ * that one failed section does not fail the call. "Not fetched" and "fetched
+ * and empty" are different answers.
+ *
+ * The `meta` is not decoration. Left to itself zod writes "accepts anything" as
+ * `"additionalProperties": {}` — an empty schema, legal and meaning exactly the
+ * same as `true`, but the spelling some MCP clients refuse or mishandle.
  */
-function redactSecrets(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(redactSecrets);
-  }
-  if (value !== null && typeof value === 'object') {
-    const redacted: Record<string, unknown> = {};
-    for (const [key, entry] of Object.entries(value)) {
-      redacted[key] = isSensitiveKey(key) ? '[redacted]' : redactSecrets(entry);
-    }
-    return redacted;
-  }
-  return value;
-}
+const section = z.union([
+  z.looseObject({}).meta({ additionalProperties: true }),
+  z.object({ error: z.string() }),
+]);
 
 export function registerServerInfoTools(
   server: McpServer,
@@ -45,8 +34,14 @@ export function registerServerInfoTools(
       title: 'Get wg-easy server info',
       description:
         'Get information about the wg-easy instance: release/update status, general settings and the WireGuard interface configuration. Secret fields (private keys, passwords) are redacted.',
-      inputSchema: {},
-      annotations: { readOnlyHint: true },
+      inputSchema: z.object({}),
+      annotations: READ_ONLY,
+      outputSchema: z.object({
+        ...untrustedFields,
+        information: section.describe('Release and update status.'),
+        general: section.describe('Instance-wide settings.'),
+        interface: section.describe('The WireGuard interface configuration.'),
+      }),
     },
     () =>
       run(async () => {
@@ -68,7 +63,7 @@ export function registerServerInfoTools(
             };
           }
         }
-        return upstreamJsonResult(
+        return upstreamResult(
           result,
           'Query a single section directly through the wg-easy UI if it was cut off.'
         );

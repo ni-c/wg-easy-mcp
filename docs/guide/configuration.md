@@ -69,6 +69,18 @@ Pass them through your MCP client's `env` block, as shown in
 line — it lands in shell history and in `ps` output — and avoid committing it to
 a config file that is under version control.
 
+## Turning the approval dialog off
+
+`create_client`, `update_client`, `delete_client` and `generate_one_time_link`
+ask a person through MCP elicitation before they act. `ELICITATION=false` takes
+them to the two-call token instead. It does not remove the guard; there is no
+setting in which a guarded call goes unannounced.
+
+The variable deliberately carries no `WG_EASY_` prefix, which means it reaches
+every MCP server in the same environment, and — unlike `WG_EASY_INSECURE_TLS` — a
+value it does not recognise **stops the server** rather than failing off. See
+[Asking a person](/guide/approval).
+
 ## Choosing the tools that load
 
 Read-only mode is one cut, along a line this server drew for you.
@@ -91,12 +103,23 @@ a prefix with a trailing `*` — `list_*` matches every tool whose name starts w
 empty value counts as unset. Nothing else is a pattern: `*_x` and `list_*_x` are
 rejected rather than silently matching nothing.
 
-**`essential`** is a curated preset of eight:
+**`essential`** is a curated preset of six:
 
-`get_server_info`, `list_clients`, `get_client`, `create_client`, `get_client_config`, `get_client_qrcode`, `enable_client`, `disable_client`.
+`get_server_info`, `list_clients`, `get_client`, `create_client`, `enable_client`, `disable_client`.
+
+Left out on purpose: `delete_client` and `update_client`, because both change
+more than an onboarding step does, and `get_client_config`, `get_client_qrcode`
+and `generate_one_time_link`, because all three hand a peer's private key to
+whoever receives the answer. Handing out a configuration is a normal part of
+onboarding, so the preset does make that one call harder — deliberately. Name
+the tool where the same session should also deliver the config.
 
 It composes — naming a tool alongside it puts that one back, and
-`WG_EASY_DENY_TOOLS` takes one away.
+`WG_EASY_DENY_TOOLS` takes one away:
+
+```
+WG_EASY_ALLOW_TOOLS=essential,get_client_config
+```
 
 **Both together.** `WG_EASY_ALLOW_TOOLS` decides what is in;
 `WG_EASY_DENY_TOOLS` is then subtracted from the result. With only a deny list,

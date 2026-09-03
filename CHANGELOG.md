@@ -7,6 +7,261 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- #region changelog -->
 
+## [Unreleased]
+
+### Added
+
+- Every tool declares an `outputSchema` and answers with `structuredContent`
+  beside the text block. A client no longer has to parse prose to use a result.
+
+  The untrusted-data marker travels with it as `untrusted: true` and
+  `source: "wg-easy"` fields, not only as a sentence in the text: a client that
+  reads the structured half and ignores the text would otherwise receive
+  free-form client names, DNS entries and endpoints with no framing at all, and
+  the framing is the guard. `delete_client` is the only tool without the marker
+  — it reports an id this server was given, not anything the instance sent.
+
+  What wg-easy sends is described with every field optional and unknown fields
+  allowed; only what this server builds is exact. The SDK validates every result
+  against the schema before it goes out, so a stricter shape would turn a
+  wg-easy release that adds a field into a tool that fails outright.
+
+### Changed
+
+- The advertised schemas avoid spellings that are legal JSON Schema and still
+  get a tool refused, or its constraint silently dropped, by some MCP clients:
+  an open object now writes `"additionalProperties": true` rather than the
+  empty schema `{}` zod emits for it; a value that was left untyped is declared
+  as what it really is; and a nullable field is written as `anyOf` branches
+  rather than `"type": ["string", "null"]`, which several clients read as a
+  single type and then drop. What the tools accept and return is unchanged;
+  only the way the schema says so is.
+
+- **Three tools answer in a new shape.** `list_clients` returns
+  `{count, clients}` instead of a bare array, `get_client_config` returns
+  `{configuration}` instead of the raw `.conf` text, and `get_client_qrcode`
+  returns `{svg}` instead of the raw markup.
+
+  All three for one reason: an output schema whose root is not an object is
+  served to a 2025-era client rewritten as `{result: …}`, so each of those
+  tools would have answered in two different shapes depending on which protocol
+  revision the client spoke.
+
+- **An oversized answer is shortened as an object, not cut as a string.** The
+  longest text field is shortened first — which is what keeps an over-budget QR
+  code and a client with a 40 kB name usable — then list entries are dropped,
+  and a `truncated` field names each field that was cut with what survived and
+  what was there. Cutting the serialized JSON at a byte offset produced text
+  that no longer parses, which a text block tolerates and `structuredContent`
+  cannot.
+
+  Where neither pass leaves anything to give, the result is now an error rather
+  than a half-answer.
+
+- `generate_one_time_link` reports `created: true` in place of
+  `success: true`, and its two read-back failures answer in that same shape with
+  a `warning` field instead of a bare sentence. The link exists on the instance
+  in all three cases, and answering that in three different shapes is how a
+  reader ends up believing nothing happened.
+
+- `delete_client` answers `{deleted: <id>}` rather than a sentence.
+
+- The two-call `confirm_token` prompt is an error result. The operation was
+  asked for and did not happen, and a tool that declares an output schema may
+  not answer without `structuredContent` unless the result is an error. The
+  text is unchanged and still carries the token.
+
+### Security
+
+- **`enable_client` now asks a person.** `update_client({clientId, enabled:
+true})` has always raised the dialog; `enable_client` did the same state
+  change with a bare POST. Whether re-arming a peer was guarded came down to
+  which of the two tools the model reached for — and under the recommended
+  `WG_EASY_ALLOW_TOOLS=essential`, only the ungated one was registered at all.
+
+  It is not on the list because it destroys something. The key pair it re-arms
+  is already installed on the peer, so nothing further has to be handed over for
+  that peer to reach every network behind the VPN. This server's own catalogue
+  calls `disable_client` the recommended reversible revocation; the undo of a
+  revocation cannot be the cheaper call. `disable_client` stays ungated, and is
+  now the only write tool that never asks: it can only withdraw access.
+
+- **`WG_EASY_READ_ONLY` no longer leaves key disclosure standing.**
+  `get_client_config` and `get_client_qrcode` return a client's `PrivateKey` in
+  the clear. Both counted as read tools, so the one coarse switch an operator
+  has for putting this server in front of a less trusted session changed nothing
+  about them: `list_clients` followed by `get_client_config` yields one
+  ready-to-use VPN configuration per peer, in the transcript, unconfirmed.
+
+  They are still reads, and their `readOnlyHint: true` is unchanged and honest —
+  nothing on the instance changes. What changed is which set they are in.
+  Read-only mode now registers `list_clients`, `get_client` and
+  `get_server_info` only, and the two are out of `essential` as well. Where a
+  session should also hand out configurations, name the tool:
+  `WG_EASY_ALLOW_TOOLS=essential,get_client_config`. That is the rule the
+  catalogue already applied to `delete_client` — the variant that cannot be
+  taken back has to be named — applied to disclosure rather than destruction.
+
+  The essential preset is six tools now, not eight.
+
+- **A live one-time link is no longer handed out by `list_clients`.** wg-easy
+  puts the link token on every row of `GET /api/client`, and `GET /cnf/<token>`
+  returns the whole configuration — private key included — with **no login at
+  all**. So an ungated read tool that survives read-only mode was returning a
+  working, unauthenticated download URL for every client whose link had not yet
+  expired. The token is now redacted like other key material; `expiresAt` is
+  not, because knowing that a link is live is what a listing is for.
+  `generate_one_time_link` still returns the value, deliberately: somebody
+  approved it.
+
+### Fixed
+
+- **`generate_one_time_link` reported failure on every successful call.** It
+  minted the link and then read it back with `GET /api/client/{id}` — but
+  wg-easy joins the one-time link onto the client row in its list query and not
+  in its single-client query, so that read answers `oneTimeLink: null` for a
+  client that has a live link. The tool then said "the link value was not
+  returned by the API", and its own description explained that away as wg-easy
+  15.4.0 answering HTTP 500.
+
+  It does not. Against a real 15.4.0 the POST answers `200 {"success":true}`,
+  the row is written, and `GET /cnf/<token>` serves the peer's configuration
+  unauthenticated for five minutes. The tool now reads the list, returns the
+  link with its `expiresAt` — and where the read-back itself fails, says the
+  link **was created** and points at the UI where it can be revoked, instead of
+  returning a bare transport error a model reads as "nothing happened". The
+  integration suite now fetches the minted URL with no credentials and asserts
+  it hands back the private key.
+
+- **`clientId` is no longer `Number()`.** `z.coerce.number()` accepted anything
+  `Number()` accepts: `{clientId: true}` addressed client 1, `{clientId: ["3"]}`
+  addressed client 3. It now takes an integer or a decimal string and rejects
+  the rest.
+
+- `WG_EASY_READ_ONLY` accepts `1`, `true` and `yes`, trimmed and
+  case-insensitively, where it used to require the exact string `true`. It is
+  the switch that fails _towards_ the restriction, so `WG_EASY_READ_ONLY=1`
+  silently leaving the write tools registered is the one outcome it must not
+  have. `WG_EASY_INSECURE_TLS` keeps the exact-match rule for the same reason
+  read the other way round: a typo there fails towards relaxed certificates.
+
+- `docs/guide/faq.md` said read-only mode was not possible ("Not today … this
+  server registers all eleven tools unconditionally"). `WG_EASY_READ_ONLY` has
+  existed since 0.4.0, and the stale answer was wrong in the unsafe direction.
+
+- **`get_client` no longer returns the client's WireGuard private key.**
+  wg-easy's single-client endpoint carries `privateKey` and `preSharedKey` in
+  full, and only `get_server_info` was filtering — so asking about a VPN client
+  put that client's key into the model's context and therefore into the
+  transcript, where it outlives any decision to stop using it.
+
+  `list_clients` does not carry the key on 15.4.0, which is what made this easy
+  to miss; the filter is applied to both anyway rather than to the one endpoint
+  that happens to need it today. `get_client_config` and `get_client_qrcode`
+  still return keys unredacted, deliberately: handing a peer its configuration
+  is what they are for, and somebody asked.
+
+  Found by the new integration suite, against a real wg-easy.
+
+### Added
+
+- **A person is asked before four operations, not just told about one.** Where
+  the MCP client supports elicitation, `create_client`, `update_client`,
+  `delete_client` and `generate_one_time_link` raise a real dialog that the
+  model cannot answer on its behalf. Where it does not, they fall back to the
+  two-call `confirm_token` — and say which of the two happened rather than
+  implying somebody approved.
+
+  The three new ones are not there because they destroy something.
+  `create_client` issues a credential that reaches every network behind the VPN;
+  `update_client` can move an address or widen `serverAllowedIps`;
+  `generate_one_time_link` mints a URL that hands out a private key without
+  authentication. Its own annotation had said "which is why the tool is guarded
+  instead" since 0.3.0, and it was not.
+
+  The `update_client` approval is bound to the **exact edit**, not to the
+  client: approving a rename does not license a later call that widens the
+  routes.
+
+### Changed
+
+- **BREAKING:** the confirmation parameter of `delete_client` is now
+  `confirm_token`, not `confirmToken`. A caller that passes the old name gets a
+  schema error. The prompt tells a model which argument to send, so it has to
+  name the one the schema declares — and the whole family spells it the same
+  way.
+- Deleting no longer keeps its own token table. It uses **`mcp-approval`**, like
+  the other fourteen servers: same five-minute lifetime, same one-use token,
+  same binding to the exact target — but the dialog comes with it, and the
+  timing comparison and the sealed request state are maintained in one place
+  rather than fourteen.
+- A confirmation prompt now shows the client's **name** on a labelled line under
+  the "supplied by the caller, not by this server" heading. A dialog that says
+  only "Delete client 5?" is not something a person can act on; a name in the
+  server's own sentence would read as the server vouching for it.
+- `ELICITATION` switches the dialog off — `false` sends a client that could have
+  been asked down the two-call-token path instead. For a scheduled job or a test
+  harness, where a dialog is the wrong shape rather than an unwanted one.
+
+  It does **not** remove the guard: there is no setting in which a guarded call
+  goes unannounced. Two deliberate rough edges come with it. The variable is
+  **not prefixed**, so one `export ELICITATION=false` reaches every MCP server in
+  the environment — which is why a server started with it off prints a line
+  saying so, and why the fallback text names the server instead of blaming a
+  client that was working fine. And a value that is neither `true` nor `false`
+  **stops the server**, where `WG_EASY_INSECURE_TLS` beside it fails _off_ on a
+  typo: this is the only variable here that defaults to _on_. It is read after
+  `WG_EASY_USERNAME` and `WG_EASY_PASSWORD` are wiped from the environment, so
+  that exit cannot leave them behind.
+
+- The startup log now also reports `WG_EASY_READ_ONLY`, which it never did, and
+  `missingConfigMessage` names the four optional variables it used to omit.
+- A `docs/guide/approval.md` page.
+- `SECURITY.md` and the security guide now say what the confirmation **proves**:
+  binding to one operation with one set of arguments, not freshness. No replay
+  defence is built, because the sealing key is per process, the two-call token
+  is single-use, and `requestState` only crosses the wire on protocol revision
+  `2026-07-28`, which this server does not offer — it takes the SDK's default
+  list, which ends at `2025-11-25`. The section names what would have to change
+  for that to stop being true.
+
+- Runs on **MCP SDK 2.0**. The wire protocol is unchanged for existing clients:
+  the server negotiates the same revision it always did, and a client that
+  worked before works now. What changed is the package layout behind it —
+  `@modelcontextprotocol/sdk` split into `core`, `server` and `client`, and the
+  deprecated Authorization Server helpers are not installed at all.
+- The linter is **oxlint** instead of eslint plus typescript-eslint, which lifts
+  the TypeScript ceiling: typescript-eslint pins `typescript` below 6.1, so this
+  repository was held on TypeScript 6 by its linter rather than by its code.
+  It is on TypeScript 7 now. Neither is visible to anyone running the server.
+- The tool filter, the host classifier and the documentation-asset generator now
+  come from **`mcp-tool-allowlist`**, **`mcp-internal-hosts`** and
+  **`svg-asset-set`** rather than from copies kept in this repository — 719
+  fewer lines here, and one place to fix each of them. All three have no runtime
+  dependencies of their own.
+- The shared libraries move to `mcp-approval` 0.7.1, `mcp-tool-allowlist` 0.2.1,
+  `mcp-internal-hosts` 0.2.1, `mcp-integration-harness` 0.2.0 and
+  `svg-asset-set` 0.2.0. The harness change is visible in the suite: where a
+  security path asserted only that a call failed, it now has to say **why** —
+  `expectError: true` is also satisfied by a schema rejection, so a renamed
+  argument used to keep such a test green while the guard it names went
+  unreached.
+
+- stdio is served through `serveStdio`, so the connection's era is negotiated
+  on the opening exchange rather than assumed. A client that pins the
+  `2026-07-28` era is served it; until now its `server/discover` probe was
+  answered with "Method not found" and only `2025-11-25` was on offer. A client
+  that speaks the older era sees no change — it is still pinned to one instance
+  for the life of the connection, exactly as a hand-wired
+  `StdioServerTransport` served it.
+
+### Fixed
+
+- An entry in `WG_EASY_ALLOW_TOOLS` that is not tool-name-shaped is now
+  **redacted** in the error rather than quoted back. `WG_EASY_PASSWORD` and
+  `WG_EASY_ALLOW_TOOLS` are adjacent lines in every compose file, and a paste
+  into the wrong one used to print the credential into the client's log.
+
 ## [0.4.0] - 2026-08-27
 
 ### Added

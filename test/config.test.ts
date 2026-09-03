@@ -21,6 +21,58 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe('ELICITATION', () => {
+  it('defaults to on, and to on for an empty value', () => {
+    // The only variable of this family that defaults to *on*. An unset switch
+    // has to mean "ask", or a deployment that never heard of it would quietly
+    // stop asking.
+    expect(loadConfig(env()).elicitation).toBe(true);
+    expect(loadConfig(env({ ELICITATION: '' })).elicitation).toBe(true);
+  });
+
+  it('is switched off by "false", in any casing or padding', () => {
+    for (const raw of ['false', 'FALSE', ' False ']) {
+      expect(loadConfig(env({ ELICITATION: raw })).elicitation, raw).toBe(
+        false
+      );
+    }
+  });
+
+  it('refuses to start on anything else, naming both valid values', () => {
+    // Deliberately fatal rather than falling back to the default: a typo would
+    // leave the dialog running while the operator believes it is off, and
+    // nothing else would ever tell them.
+    for (const raw of ['1', 'off', 'no']) {
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const exit = vi.spyOn(process, 'exit').mockImplementation((() => {
+        throw new Error('exit');
+      }) as never);
+      expect(() => loadConfig(env({ ELICITATION: raw }))).toThrow('exit');
+      expect(exit).toHaveBeenCalledWith(1);
+      const message = String(error.mock.calls[0]?.[0] ?? '');
+      expect(message, raw).toContain('ELICITATION');
+      expect(message, raw).toContain('"true"');
+      expect(message, raw).toContain('"false"');
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('has already wiped the credential by the time it can exit', () => {
+    // parseElicitation sits *after* the delete on purpose. An exit above it
+    // would leave the credential in the environment for whatever a crash
+    // reporter or an inspector does next — which is exactly what that delete
+    // exists to prevent, and its comment says so.
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(process, 'exit').mockImplementation((() => {
+      throw new Error('exit');
+    }) as never);
+    const e = env({ ELICITATION: 'nonsense' });
+    expect(() => loadConfig(e)).toThrow('exit');
+    expect(e.WG_EASY_PASSWORD).toBeUndefined();
+    vi.restoreAllMocks();
+  });
+});
+
 describe('loadConfig', () => {
   it('returns the config and strips trailing slashes from the URL', () => {
     const config = loadConfig(env({ WG_EASY_URL: 'https://wg.example.com/' }));
@@ -30,6 +82,7 @@ describe('loadConfig', () => {
       password: 'secret',
       insecureTls: false,
       readOnly: false,
+      elicitation: true,
       allowTools: undefined,
       denyTools: undefined,
     });
@@ -38,6 +91,37 @@ describe('loadConfig', () => {
   it('parses WG_EASY_INSECURE_TLS=true', () => {
     const config = loadConfig(env({ WG_EASY_INSECURE_TLS: 'true' }));
     expect(config.insecureTls).toBe(true);
+  });
+
+  it.each(['true', 'TRUE', ' true ', '1', 'yes', 'Yes'])(
+    'reads WG_EASY_READ_ONLY=%j as on',
+    (value) => {
+      // Read-only is the switch that fails towards the restriction, so every
+      // spelling an operator plausibly writes into a compose file has to close
+      // it. Silently leaving the write tools registered because someone wrote
+      // `1` is the one outcome that cannot be allowed here.
+      expect(loadConfig(env({ WG_EASY_READ_ONLY: value })).readOnly).toBe(true);
+    }
+  );
+
+  it.each(['false', '', 'no', '0', 'off'])(
+    'reads WG_EASY_READ_ONLY=%j as off',
+    (value) => {
+      expect(loadConfig(env({ WG_EASY_READ_ONLY: value })).readOnly).toBe(
+        false
+      );
+    }
+  );
+
+  it('leaves WG_EASY_INSECURE_TLS strict, unlike read-only', () => {
+    // The opposite direction: a typo here would relax certificate validation,
+    // so only the exact string counts.
+    for (const value of ['1', 'yes', 'TRUE', ' true ']) {
+      expect(
+        loadConfig(env({ WG_EASY_INSECURE_TLS: value })).insecureTls,
+        value
+      ).toBe(false);
+    }
   });
 
   it('removes the credentials from the environment after loading', () => {
@@ -82,6 +166,7 @@ describe('loadConfig', () => {
       password: undefined,
       insecureTls: false,
       readOnly: false,
+      elicitation: true,
       allowTools: undefined,
       denyTools: undefined,
     });
