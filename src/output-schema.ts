@@ -7,6 +7,13 @@ import { z } from 'zod';
  * tool files, because three of them describe the same client record and the
  * marker fields belong to every upstream answer. A second copy is how the rest
  * of this family started drifting.
+ *
+ * Every open object here carries `.meta({ additionalProperties: true })`. Left
+ * to itself zod writes "accepts anything" as `"additionalProperties": {}` — an
+ * empty schema, legal and meaning exactly the same as `true`, but the spelling
+ * some MCP clients refuse or mishandle. `meta` is merged into the emitted JSON
+ * Schema and nothing else, so the wire says `true` while the runtime stays as
+ * permissive as it has to be.
  */
 
 /** The marker every result built from wg-easy content carries. */
@@ -45,33 +52,73 @@ export const truncationNote = z
  * because `redactSecrets` replaces them with `[redacted]` — the type describes
  * what leaves this server, not what arrived.
  */
-export const clientRecord = z.looseObject({
-  id: z.number().optional(),
-  name: z.string().optional(),
-  enabled: z.boolean().optional(),
-  expiresAt: z.string().nullable().optional(),
-  ipv4Address: z.string().optional(),
-  ipv6Address: z.string().optional(),
-  publicKey: z.string().optional(),
-  privateKey: z.string().optional().describe('Always "[redacted]".'),
-  preSharedKey: z.string().optional().describe('Always "[redacted]".'),
-  allowedIps: z.array(z.string()).nullable().optional(),
-  serverAllowedIps: z.array(z.string()).optional(),
-  dns: z.array(z.string()).nullable().optional(),
-  mtu: z.number().optional(),
-  persistentKeepalive: z.number().optional(),
-  serverEndpoint: z.string().nullable().optional(),
-  createdAt: z.string().optional(),
-  updatedAt: z.string().optional(),
-  latestHandshakeAt: z.string().nullable().optional(),
-  transferRx: z.number().nullable().optional(),
-  transferTx: z.number().nullable().optional(),
-  oneTimeLink: z
-    .unknown()
-    .optional()
-    .describe(
-      'A joined row on wg-easy 15, a bare string on older builds. The token ' +
-        'itself is replaced with "[redacted]" — it is a bearer credential for ' +
-        "that client's whole configuration."
-    ),
-});
+export const clientRecord = z
+  .looseObject({
+    id: z.number().optional(),
+    name: z.string().optional(),
+    enabled: z.boolean().optional(),
+    expiresAt: z
+      .string()
+      .describe('ISO 8601, or null when the client does not expire.')
+      .nullable()
+      .optional(),
+    ipv4Address: z.string().optional(),
+    ipv6Address: z.string().optional(),
+    publicKey: z.string().optional(),
+    privateKey: z.string().optional().describe('Always "[redacted]".'),
+    preSharedKey: z.string().optional().describe('Always "[redacted]".'),
+    allowedIps: z.array(z.string()).nullable().optional(),
+    serverAllowedIps: z.array(z.string()).optional(),
+    dns: z.array(z.string()).nullable().optional(),
+    mtu: z.number().optional(),
+    persistentKeepalive: z.number().optional(),
+    serverEndpoint: z
+      .string()
+      .describe('The endpoint the client dials, null when unset.')
+      .nullable()
+      .optional(),
+    createdAt: z.string().optional(),
+    updatedAt: z.string().optional(),
+    latestHandshakeAt: z
+      .string()
+      .describe('ISO 8601 of the last handshake, null when there was none.')
+      .nullable()
+      .optional(),
+    transferRx: z
+      .number()
+      .describe('Bytes received, null before the first handshake.')
+      .nullable()
+      .optional(),
+    transferTx: z
+      .number()
+      .describe('Bytes sent, null before the first handshake.')
+      .nullable()
+      .optional(),
+    oneTimeLink: z
+      .union([
+        z
+          .looseObject({})
+          .meta({ additionalProperties: true })
+          .describe('The joined row wg-easy 15 returns.'),
+        z.string().describe('The bare token older builds return.'),
+      ])
+      .nullable()
+      .optional()
+      .describe(
+        'A joined row on wg-easy 15, a bare string on older builds. The token ' +
+          'itself is replaced with "[redacted]" — it is a bearer credential for ' +
+          "that client's whole configuration."
+      ),
+  })
+  .meta({ additionalProperties: true });
+
+/**
+ * The same client record, marked as upstream content.
+ *
+ * Its own `meta` and not just the one on `clientRecord`: `extend` builds a new
+ * schema and does not carry the parent's metadata over, so an extended record
+ * would go back to spelling `additionalProperties` as `{}`.
+ */
+export const markedClient = clientRecord
+  .extend(untrustedFields)
+  .meta({ additionalProperties: true });

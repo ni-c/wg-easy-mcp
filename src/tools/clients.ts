@@ -12,6 +12,7 @@ import type { WgEasyApi } from '../api.js';
 import { READ_ONLY } from './annotations.js';
 import {
   clientRecord,
+  markedClient,
   truncationNote,
   untrustedFields,
 } from '../output-schema.js';
@@ -172,7 +173,7 @@ export function registerClientTools(
         'those two are for.',
       inputSchema: z.object({ clientId }),
       annotations: READ_ONLY,
-      outputSchema: clientRecord.extend(untrustedFields),
+      outputSchema: markedClient,
     },
     ({ clientId }) =>
       run(async () =>
@@ -213,7 +214,7 @@ export function registerClientTools(
         idempotentHint: false,
         openWorldHint: false,
       },
-      outputSchema: clientRecord.extend(untrustedFields),
+      outputSchema: markedClient,
     },
     async ({ name, expiresAt, confirm_token }, mcp) =>
       run(async () => {
@@ -277,9 +278,9 @@ export function registerClientTools(
           .describe('Enable or disable the client'),
         expiresAt: z
           .string()
+          .describe('Expiry date as ISO string, or null to remove the expiry')
           .nullable()
-          .optional()
-          .describe('Expiry date as ISO string, or null to remove the expiry'),
+          .optional(),
         ipv4Address: z
           .string()
           .optional()
@@ -323,7 +324,7 @@ export function registerClientTools(
         idempotentHint: true,
         openWorldHint: false,
       },
-      outputSchema: clientRecord.extend(untrustedFields),
+      outputSchema: markedClient,
     },
     async ({ clientId, confirm_token, ...changes }, mcp) =>
       run(async () => {
@@ -410,7 +411,7 @@ export function registerClientTools(
         idempotentHint: true,
         openWorldHint: false,
       },
-      outputSchema: clientRecord.extend(untrustedFields),
+      outputSchema: markedClient,
     },
     async ({ clientId, confirm_token }, mcp) =>
       run(async () => {
@@ -470,7 +471,7 @@ export function registerClientTools(
         idempotentHint: true,
         openWorldHint: false,
       },
-      outputSchema: clientRecord.extend(untrustedFields),
+      outputSchema: markedClient,
     },
     ({ clientId }) =>
       run(async () =>
@@ -633,7 +634,11 @@ export function registerClientTools(
           .describe('The link exists on the instance, whatever else is here.'),
         oneTimeLink: z.string().optional().describe('The token, if read back.'),
         path: z.string().optional().describe('Where the token is downloaded.'),
-        expiresAt: z.string().nullable().optional(),
+        expiresAt: z
+          .string()
+          .describe('ISO 8601, or null when the link does not expire.')
+          .nullable()
+          .optional(),
         warning: z
           .string()
           .optional()
