@@ -1,6 +1,7 @@
 # wg-easy-mcp
 
 [![CI](https://img.shields.io/github/actions/workflow/status/ni-c/wg-easy-mcp/ci.yml?branch=main&label=CI)](https://github.com/ni-c/wg-easy-mcp/actions/workflows/ci.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/ni-c/wg-easy-mcp/badge)](https://scorecard.dev/viewer/?uri=github.com/ni-c/wg-easy-mcp)
 [![npm version](https://img.shields.io/npm/v/wg-easy-mcp)](https://www.npmjs.com/package/wg-easy-mcp)
 [![npm downloads](https://img.shields.io/npm/dm/wg-easy-mcp)](https://www.npmjs.com/package/wg-easy-mcp)
 [![node](https://img.shields.io/node/v/wg-easy-mcp)](https://nodejs.org)
