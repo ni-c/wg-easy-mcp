@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   file nobody could open. `dist/**/*.js` is unchanged; the package is about a
   fifth smaller.
 
+### Fixed
+
+- `prepublishOnly` runs the linter and the test suite again. It had been reduced
+  to `typecheck && build`, so `npm publish` from a workstation would have shipped
+  a package whose tests were never run — the one moment that check matters most.
+  CI was unaffected and stays the real gate; this closes the local path.
+
 [Unreleased]: https://github.com/ni-c/wg-easy-mcp/compare/v0.5.0...HEAD
 
 ## [0.5.0] - 2026-09-03
