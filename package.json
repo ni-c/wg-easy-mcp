@@ -19,7 +19,7 @@
   "bugs": {
     "url": "https://github.com/ni-c/wg-easy-mcp/issues"
   },
-  "homepage": "https://github.com/ni-c/wg-easy-mcp#readme",
+  "homepage": "https://wg-easy-mcp.ni-c.de",
   "funding": "https://github.com/sponsors/ni-c",
   "type": "module",
   "bin": {
