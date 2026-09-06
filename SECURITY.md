@@ -6,6 +6,10 @@ Please use [GitHub private vulnerability reporting](https://github.com/ni-c/wg-e
 
 Only the latest release and the current `main` branch receive security fixes.
 
+## Supported versions
+
+Only the latest release and the current `main` branch receive security fixes.
+
 ## Trust model
 
 wg-easy-mcp is a stdio MCP server that administers a real [wg-easy](https://github.com/wg-easy/wg-easy) instance. It authenticates with the instance's admin credentials (`WG_EASY_USERNAME`/`WG_EASY_PASSWORD`), so anything that can read the server's process environment effectively holds VPN admin access: it can create, disable and delete peers and download their private keys via client configs and QR codes.
