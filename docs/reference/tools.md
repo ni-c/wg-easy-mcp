@@ -45,6 +45,8 @@ a wg-easy release that adds a field into a tool that fails outright.
 
 ## list_clients
 
+**essential**
+
 Lists all WireGuard clients with status, addresses and traffic statistics.
 
 | Argument | Type                | Required | Description                 |
@@ -54,13 +56,17 @@ Lists all WireGuard clients with status, addresses and traffic statistics.
 
 ## get_client
 
+**essential**
+
 Full details of a single client.
 
 | Argument   | Type             | Required | Description                    |
 | ---------- | ---------------- | -------- | ------------------------------ |
 | `clientId` | positive integer | yes      | Numeric ID from `list_clients` |
 
-## create_client
+## create_client 👤
+
+**essential**
 
 Creates a client. wg-easy generates the keys and IP addresses; the new client ID
 comes back in the response.
@@ -70,7 +76,7 @@ comes back in the response.
 | `name`      | string | yes      | Display name                                    |
 | `expiresAt` | string | no       | ISO date, e.g. `2026-12-31`. Omit for no expiry |
 
-## update_client
+## update_client 👤
 
 Changes only the fields you pass; everything else keeps its current value.
 
@@ -95,22 +101,31 @@ which run as root on the wg-easy host — are dropped and can never be set here.
 | `mtu`                 | integer          | MTU                                             |
 | `persistentKeepalive` | integer          | Keepalive interval in seconds (`0` disables it) |
 
-## enable_client / disable_client
+## disable_client
+
+**essential**
 
 A disabled client keeps its configuration and keys but cannot connect, which
-makes `disable_client` the reversible alternative to deleting. It takes only
-`clientId` and asks nobody: it can only ever withdraw access.
+makes this the reversible alternative to deleting. It takes only `clientId` and
+asks nobody: it can only ever withdraw access.
 
-`enable_client` is the undo of that revocation, so since 0.5.0 it asks a person
-first and takes `confirm_token` on the fallback path, exactly like
-`delete_client` below. The key pair it re-arms is already installed on the peer,
-so nothing further has to be handed over for that peer to reach every network
-behind the VPN.
+| Argument   | Type             | Required | Description  |
+| ---------- | ---------------- | -------- | ------------ |
+| `clientId` | positive integer | yes      | Which client |
 
-| Argument        | Type             | Required | Description                                |
-| --------------- | ---------------- | -------- | ------------------------------------------ |
-| `clientId`      | positive integer | yes      | Which client                               |
-| `confirm_token` | string           | no       | `enable_client` only, on the fallback path |
+## enable_client 👤
+
+**essential**
+
+The undo of that revocation, so since 0.5.0 it asks a person first and takes
+`confirm_token` on the fallback path, exactly like `delete_client` below. The key
+pair it re-arms is already installed on the peer, so nothing further has to be
+handed over for that peer to reach every network behind the VPN.
+
+| Argument        | Type             | Required | Description               |
+| --------------- | ---------------- | -------- | ------------------------- |
+| `clientId`      | positive integer | yes      | Which client              |
+| `confirm_token` | string           | no       | Only on the fallback path |
 
 ::: warning enable_client was ungated before 0.5.0
 `update_client({clientId, enabled: true})` has always asked. `enable_client` did
@@ -119,7 +134,7 @@ tools was called — and under `WG_EASY_ALLOW_TOOLS=essential` only the ungated
 one was registered.
 :::
 
-## delete_client
+## delete_client 👤
 
 Permanently deletes a client. **Irreversible** — the peer loses access and its
 keys cannot be restored.
@@ -159,7 +174,7 @@ output as a credential.
 The same configuration as SVG QR code markup, for the WireGuard mobile apps. It
 encodes the same private key and deserves the same handling.
 
-## generate_one_time_link
+## generate_one_time_link 👤
 
 Generates a link that lets someone download a client configuration **once,
 without authenticating**, so it can be sent to the end user. The link expires
@@ -183,6 +198,8 @@ otherwise hand it out as a bearer credential; `expiresAt` is not, so a listing
 still shows that a link is live.
 
 ## get_server_info
+
+**essential**
 
 Aggregates three admin endpoints — release/update status, general settings and
 the WireGuard interface configuration. Secret fields are
