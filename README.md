@@ -31,6 +31,8 @@ reliably from six than from eleven — see
   <img src="https://wg-easy-mcp.ni-c.de/architecture.svg" alt="An MCP client speaks stdio to wg-easy-mcp, which calls the wg-easy v15 REST API over HTTPS with Basic Authentication" width="800">
 </picture>
 
+![Listing the tools, narrowing them to the essential preset, and the startup abort a mistyped tool name produces](https://wg-easy-mcp.ni-c.de/demo.gif)
+
 ## What makes it different
 
 **The full client lifecycle over the wg-easy v15 REST API**, including `.conf`

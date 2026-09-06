@@ -71,6 +71,8 @@ features:
 <figcaption>The server holds no state beyond short-lived approvals; wg-easy remains the source of truth.</figcaption>
 </figure>
 
+![Listing the tools, narrowing them to the essential preset, and the startup abort a mistyped tool name produces](/demo.gif)
+
 ## Running it elsewhere
 
 A client that cannot spawn a local process — ChatGPT connectors, Claude on the web,

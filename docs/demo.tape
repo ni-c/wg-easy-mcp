@@ -1,24 +1,27 @@
-# vhs script for the demo GIF: `vhs docs/demo.tape` writes public/demo.gif
+# vhs script for the demo GIF: `vhs docs/demo.tape` writes docs/public/demo.gif
 #
 # Prerequisites:
 #   * vhs installed (https://github.com/charmbracelet/vhs)
-#   * the server built (npm run build) and a reachable wg-easy v15 instance
-#   * export WG_EASY_URL / WG_EASY_USERNAME / WG_EASY_PASSWORD before running
-#   * run from the repository root, not from docs/
+#   * the server built (npm run build)
+#   * run it from the repository root, not from docs/
 #
-# Only read-only tools are recorded on purpose — this points at a real VPN.
+# No credentials, on purpose: the server starts without an API key, so this tape
+# is reproducible by anyone from a fresh clone, and what it demonstrates — the
+# tool filter — is the part a screenshot of somebody else's dashboard cannot show.
 #
 # Rules learned the hard way:
 #   * inside Hide blocks use vhs's own `Sleep`, never the shell's — shell sleep
 #     blocks and the tape ends before any output is recorded
-#   * MCP meta-tools need `arguments: {}` explicitly; it cannot be omitted
-#   * start from the running server, do not record the setup
+#   * `-e` goes AFTER the command being launched, and the Inspector does not
+#     inherit the shell environment: `X=1 npx … inspector …` silently applies
+#     nothing at all
+#   * three beats, no more
 
 Output docs/public/demo.gif
 
 Set FontSize 16
 Set Width 1200
-Set Height 640
+Set Height 460
 Set Padding 20
 Set Theme "Catppuccin Mocha"
 
@@ -27,13 +30,17 @@ Type "clear" Enter
 Sleep 500ms
 Show
 
-Type "# WG_EASY_URL / _USERNAME / _PASSWORD are already exported" Enter
-Sleep 1s
-Type "# 1. what does the server expose?" Enter
-Sleep 1s
-Type "npx -y @modelcontextprotocol/inspector --cli node dist/index.js --method tools/list | jq -r '.tools[].name'" Enter
+Type "# eleven tools" Enter
+Sleep 800ms
+Type "npx -y @modelcontextprotocol/inspector --cli node dist/index.js --method tools/list 2>/dev/null | jq -r '.tools[].name' | paste -sd' '" Enter
+Sleep 12s
+
+Type "# or six, curated" Enter
+Sleep 800ms
+Type "npx -y @modelcontextprotocol/inspector --cli node dist/index.js -e WG_EASY_ALLOW_TOOLS=essential --method tools/list 2>/dev/null | jq -r '.tools[].name' | paste -sd' '" Enter
+Sleep 12s
+
+Type "# a typo stops the server instead of quietly hiding a tool" Enter
+Sleep 800ms
+Type "WG_EASY_ALLOW_TOOLS=list_clientz node dist/index.js 2>&1 | tail -1 | fold -sw 100" Enter
 Sleep 6s
-Type "# 2. list the VPN clients (read-only)" Enter
-Sleep 1s
-Type "npx -y @modelcontextprotocol/inspector --cli node dist/index.js --method tools/call --tool-name list_clients | head -20" Enter
-Sleep 8s
