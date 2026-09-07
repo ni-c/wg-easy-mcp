@@ -180,3 +180,76 @@ describe('nothing else is disturbed', () => {
     );
   });
 });
+
+/**
+ * The suffix rule. A key is sensitive by what it *ends* in, because the exact
+ * list is what let `metricsPassword` through — and a property over prefix,
+ * separator, suffix and casing is the only way to say "every spelling".
+ */
+describe('a secret under a compound key', () => {
+  const SUFFIXES = [
+    'password',
+    'passwordHash',
+    'passwd',
+    'passphrase',
+    'secret',
+    'token',
+    'apiKey',
+    'privateKey',
+    'preSharedKey',
+  ];
+  const PREFIXES = ['', 'metrics', 'git', 'oauth', 'session', 'db'];
+  const SEPARATORS = ['', '_', '-'];
+
+  it('is redacted whatever the prefix, separator or casing', () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom(...PREFIXES),
+        fc.constantFrom(...SEPARATORS),
+        fc.constantFrom(...SUFFIXES),
+        fc.constantFrom('lower', 'upper', 'as-is'),
+        (prefix, separator, suffix, casing) => {
+          const raw = prefix === '' ? suffix : `${prefix}${separator}${suffix}`;
+          const key =
+            casing === 'lower'
+              ? raw.toLowerCase()
+              : casing === 'upper'
+                ? raw.toUpperCase()
+                : raw;
+          const out = redactSecrets({
+            [key]: CANARY,
+            neighbour: 'kept',
+          }) as Record<string, unknown>;
+          expect(out[key], key).toBe('[redacted]');
+          expect(out.neighbour).toBe('kept');
+        }
+      ),
+      RUNS
+    );
+  });
+
+  it.each([
+    'publicKey',
+    'tokenExpiresAt',
+    'passwordResetAt',
+    'secrets',
+    'sshKey',
+    'name',
+    'oneTimeLinkExpiresAt',
+  ])('leaves %s alone', (key) => {
+    const out = redactSecrets({ [key]: 'value' }) as Record<string, unknown>;
+    expect(out[key]).toBe('value');
+  });
+
+  it('keeps a __proto__ key as an own property and the prototype as is', () => {
+    const value = JSON.parse(
+      '{"__proto__": {"privateKey": "SECRET"}, "privateKey": "k"}'
+    ) as Record<string, unknown>;
+    const out = redactSecrets(value) as Record<string, unknown>;
+    expect(Object.hasOwn(out, '__proto__')).toBe(true);
+    expect(Object.getPrototypeOf(out)).toBe(Object.prototype);
+    expect(JSON.stringify(out)).toBe(
+      '{"__proto__":{"privateKey":"[redacted]"},"privateKey":"[redacted]"}'
+    );
+  });
+});

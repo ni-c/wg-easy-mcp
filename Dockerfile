@@ -32,8 +32,16 @@ RUN apk add --no-cache --upgrade libcrypto3 libssl3
 # dependency tree (tar, brace-expansion, ip-address, an old undici) is what a
 # container scan of this image actually trips over. None of it is reachable at
 # runtime, so remove it rather than carrying known-vulnerable code around.
-RUN rm -rf /usr/local/lib/node_modules/npm \
-  /usr/local/bin/npm /usr/local/bin/npx
+#
+# corepack and yarn go with it, for the same reason and by the same argument:
+# the base image ships them, nothing here runs them, and corepack vendors its
+# own dependency tree. Removing npm by hand and stopping there is the third time
+# this has happened in the family — check with
+# `docker run --rm --entrypoint sh <image> -c 'ls /opt /usr/local/lib/node_modules; which yarn npm npx corepack'`
+# after a build, not by reading this line.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+  /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
+  /usr/local/bin/yarn /usr/local/bin/yarnpkg /opt/yarn-v*
 
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist

@@ -247,3 +247,57 @@ describe('loadConfig', () => {
     expect(error).not.toHaveBeenCalled();
   });
 });
+
+describe('the URL as stored', () => {
+  it('is the origin and path of what was parsed, without query or fragment', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const config = loadConfig(
+      env({ WG_EASY_URL: 'https://vpn.example.com:51821/base/?token=x#frag' })
+    );
+    expect(config.url).toBe('https://vpn.example.com:51821/base');
+    const output = error.mock.calls.flat().join(' ');
+    expect(output).toContain('query or fragment');
+    expect(output).not.toContain('token=x');
+  });
+
+  it('drops trailing slashes in linear time', () => {
+    const url = `https://vpn.example.com${'/'.repeat(100_000)}`;
+    const started = performance.now();
+    const config = loadConfig(env({ WG_EASY_URL: url }));
+    expect(performance.now() - started).toBeLessThan(200);
+    expect(config.url).toBe('https://vpn.example.com');
+  });
+
+  it('does not print the scheme of a URL that is not http(s)', () => {
+    // A hexadecimal key with a colon after it *is* a URL, and its scheme is
+    // the key.
+    mockExit();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const key = 'deadbeefcafe0123456789abcdef0123456789abcdef0123456789ab';
+    expect(() => loadConfig(env({ WG_EASY_URL: `${key}:anything` }))).toThrow(
+      'process.exit'
+    );
+    const output = error.mock.calls.flat().join(' ');
+    expect(output).toContain('must use http:// or https://');
+    expect(output).not.toContain(key);
+  });
+});
+
+describe('ELICITATION, when it holds the wrong thing', () => {
+  it('quotes a short printable value and describes a long one', () => {
+    for (const [raw, expected] of [
+      ['off', '"off"'],
+      ['eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.SECRET', 'a 43-character value'],
+    ] as const) {
+      mockExit();
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+      expect(() => loadConfig(env({ ELICITATION: raw }))).toThrow(
+        'process.exit'
+      );
+      const output = error.mock.calls.flat().join(' ');
+      expect(output).toContain(expected);
+      if (raw.length > 16) expect(output).not.toContain('SECRET');
+      vi.restoreAllMocks();
+    }
+  });
+});

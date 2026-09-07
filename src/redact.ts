@@ -2,23 +2,44 @@
  * Removes secrets from anything the wg-easy API hands back.
  *
  * wg-easy returns key material in full, in more places than is obvious. The
- * admin endpoints carry the WireGuard **server** private key; the client
- * endpoints carry each client's **own** private key and pre-shared key. All of
- * it would otherwise land in the model's context and therefore in the
- * transcript, where it outlives any decision to stop using it.
+ * admin endpoints carry the WireGuard **server** private key and the argon2
+ * hash of the metrics token; the client endpoints carry each client's **own**
+ * private key and pre-shared key. All of it would otherwise land in the model's
+ * context and therefore in the transcript, where it outlives any decision to
+ * stop using it.
  *
  * `get_client_config` exists for the case where somebody genuinely wants a
  * client's key: it returns the configuration file, deliberately, on request.
  * Nothing else needs to.
  */
 
-const SENSITIVE_KEYS = new Set([
-  'privatekey',
-  'presharedkey',
+/**
+ * A key is sensitive by what it **ends in**, on the key with `_` and `-`
+ * removed and lower-cased.
+ *
+ * It used to be an exact list, and `metricsPassword` is what that costs:
+ * `GET /api/admin/general` carries the argon2 hash of the metrics token under
+ * that name, `password` matched `password` and not `metricsPassword`, and the
+ * hash went out through a tool whose own description promises that passwords
+ * are redacted. Every `<prefix><Secret>` the instance invents is the same
+ * finding waiting to happen, and the suffix rule is what makes the answer not
+ * depend on wg-easy's naming.
+ *
+ * `key` is deliberately **not** in the list: it would take `sshKey` and every
+ * other `*_key` identifier with it. `publicKey` has to survive — it is how a
+ * peer is identified, and it is public.
+ */
+const SENSITIVE_SUFFIXES = [
   'password',
   'passwordhash',
-  'sessionsecret',
-]);
+  'passwd',
+  'passphrase',
+  'secret',
+  'token',
+  'apikey',
+  'privatekey',
+  'presharedkey',
+];
 
 /**
  * Keys that are a secret only when they hold the secret *itself*.
@@ -38,10 +59,18 @@ const SENSITIVE_KEYS = new Set([
  */
 const SENSITIVE_STRING_KEYS = new Set(['onetimelink']);
 
+/** The key as it is matched: separators removed, lower-cased. */
+function normalizeKey(key: string): string {
+  return key.replaceAll('_', '').replaceAll('-', '').toLowerCase();
+}
+
 function isSensitiveKey(key: string, value: unknown): boolean {
-  const lower = key.toLowerCase();
-  if (SENSITIVE_KEYS.has(lower) || lower.startsWith('totp')) return true;
-  return typeof value === 'string' && SENSITIVE_STRING_KEYS.has(lower);
+  const normalized = normalizeKey(key);
+  if (normalized.startsWith('totp')) return true;
+  if (SENSITIVE_SUFFIXES.some((suffix) => normalized.endsWith(suffix))) {
+    return true;
+  }
+  return typeof value === 'string' && SENSITIVE_STRING_KEYS.has(normalized);
 }
 
 export function redactSecrets(value: unknown): unknown {
@@ -49,13 +78,17 @@ export function redactSecrets(value: unknown): unknown {
     return value.map(redactSecrets);
   }
   if (value !== null && typeof value === 'object') {
-    const redacted: Record<string, unknown> = {};
-    for (const [key, entry] of Object.entries(value)) {
-      redacted[key] = isSensitiveKey(key, entry)
-        ? '[redacted]'
-        : redactSecrets(entry);
-    }
-    return redacted;
+    // `Object.fromEntries`, not `out[key] = …`: `__proto__` is legal JSON and
+    // an own property after `JSON.parse`, and assigning to it through a
+    // variable key runs the `Object.prototype` setter — the field is dropped
+    // and the prototype of what leaves this function is replaced by whatever
+    // the instance sent. `fromEntries` defines every key as an own property.
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        isSensitiveKey(key, entry) ? '[redacted]' : redactSecrets(entry),
+      ])
+    );
   }
   return value;
 }

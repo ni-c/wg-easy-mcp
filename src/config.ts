@@ -71,10 +71,40 @@ export function parseElicitation(raw: string | undefined): boolean {
   if (value === undefined || value === '' || value === 'true') return true;
   if (value === 'false') return false;
   console.error(
-    `wg-easy-mcp: ELICITATION must be "true" or "false" — got "${raw}". ` +
+    `wg-easy-mcp: ELICITATION must be "true" or "false" — got ${describe(raw ?? '')}. ` +
       'Refusing to start rather than guess.'
   );
   process.exit(1);
+}
+
+/**
+ * A wrong value, said back to the operator without printing a secret.
+ *
+ * The purpose of the message is to show somebody their typo, so a short
+ * word-shaped value is quoted — "got \"off\"" is the whole point of the line.
+ * Anything else is described by its length: this variable is unprefixed and
+ * sits in the same block as the credentials in every compose file, so the value
+ * that lands here wrongly is as likely to be a pasted token as a typo, and a
+ * token printed to stderr is a token in the MCP host's log.
+ */
+function describe(raw: string): string {
+  return /^[A-Za-z0-9_-]{1,12}$/.test(raw)
+    ? `"${raw}"`
+    : `a ${raw.length}-character value`;
+}
+
+/**
+ * Trailing slashes removed, walking an index.
+ *
+ * `replace(/\/+$/, '')` is the same line and quadratic: the pattern is tried
+ * from every position of the run, and every attempt consumes the rest of it —
+ * 60 000 slashes with one character behind them measured 1.2 s, on the startup
+ * path. `slice` in a loop has the same shape in bytes. One walk, one slice.
+ */
+function withoutTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 0x2f) end -= 1;
+  return value.slice(0, end);
 }
 
 /**
@@ -150,8 +180,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     process.exit(1);
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    // The scheme is not printed. A hexadecimal key with a colon after it *is* a
+    // URL, and its scheme is the key — so the branch that fires on "this is not
+    // the value I expected" would print the pasted secret in full, which is the
+    // exact thing the "not a valid URL" branch above was written not to do.
     console.error(
-      `wg-easy-mcp: WG_EASY_URL must use http:// or https:// (got ${parsed.protocol})`
+      'wg-easy-mcp: WG_EASY_URL must use http:// or https:// (e.g. https://vpn.example.com:51821)'
     );
     process.exit(1);
   }
@@ -173,8 +207,21 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     );
   }
 
+  // The parsed URL, not the environment string. Every path in this server is
+  // appended to this value, so a query or a fragment left on the end would be
+  // glued in *front* of `/api/client` — a request to a path that does not
+  // exist, from a variable that looked right. What was dropped is named and
+  // not printed: a query string is where a token would be.
+  if (parsed.search !== '' || parsed.hash !== '') {
+    console.error(
+      'wg-easy-mcp: WG_EASY_URL carries a query or fragment. Only its origin ' +
+        'and path are used; the rest is dropped and deliberately not printed ' +
+        'here, in case it holds a credential.'
+    );
+  }
+
   return {
-    url: url.replace(/\/+$/, ''),
+    url: withoutTrailingSlashes(parsed.origin + parsed.pathname),
     username,
     password,
     insecureTls,

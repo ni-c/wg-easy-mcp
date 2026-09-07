@@ -7,25 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- #region changelog -->
 
-## [Unreleased]
+## [0.6.0] - 2026-09-07
 
 ### Added
 
 - A demo GIF in the README and on the documentation home page, recorded from
   `docs/demo.tape` with no credentials: the tool list, the same list narrowed by
   the `essential` preset, and the startup abort a mistyped tool name produces.
-
-### Changed
-
-- The tool reference marks the `essential` preset and the tools that ask a
-  person before they act, per tool rather than only in the introduction. A test
-  keeps both sets in step with the code.
-- `homepage` in `package.json` points at the documentation site rather than at
-  the README anchor on GitHub. It is what npm shows next to the package, and
-  every one of these servers has had a documentation site for weeks.
-
-### Added
-
 - The server introduces itself in full. `title`, `description`, `websiteUrl` and
   `icons` now travel with `name` and `version`, so a client that shows a server
   to a person has something to show. All four were already in `server.json` for
@@ -38,11 +26,109 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The tool reference marks the `essential` preset and the tools that ask a
+  person before they act, per tool rather than only in the introduction. A test
+  keeps both sets in step with the code.
+- `homepage` in `package.json` points at the documentation site rather than at
+  the README anchor on GitHub. It is what npm shows next to the package, and
+  every one of these servers has had a documentation site for weeks.
 - Source maps are no longer published in the npm tarball. Node reads them only
   under `--enable-source-maps`, which nothing here sets, and the maps pointed at
   a `src/` this package does not ship — so a stack trace under that flag named a
   file nobody could open. `dist/**/*.js` is unchanged; the package is about a
   fifth smaller.
+- `list_clients` reports what it could not read. An entry in the client list
+  that is not a record cannot be a client and is left out; how many were left
+  out is now a `skipped` field rather than silence.
+
+### Security
+
+- **mcp-approval 0.8.2.** A sealed dialog answer is single-use since 0.8.1: the
+  same `requestState` presented again within its lifetime used to be accepted
+  again, and with a resource key that is the same every time — a whole stream, a
+  fixed set of targets — every replay landed. npm users on `^0.8.0` already had
+  the fix; the Docker image is built from the lockfile and carried 0.8.0 until
+  this release.
+- **Approval keys bound to positions.** `create_client` keyed its approval on
+  the set {name, expiry}, and a set has no positions: a client name is free
+  text, so a name that spells a date paired with an expiry that spells the name
+  sorted to the same key, and a token obtained for one pairing also confirmed
+  the other. The key now comes from `orderedResourceKey` in mcp-approval 0.8.2,
+  which binds each part to its place. `update_client` stays on `setResourceKey`
+  on purpose: its parts are the numeric id plus self-labelled `field=value`
+  pairs, which is a set by nature — no swap of two parts describes a different
+  edit, and an id cannot be mistaken for a labelled pair.
+- **The metrics password is redacted.** `GET /api/admin/general` carries the
+  argon2 hash of the metrics token as `metricsPassword`, and the redaction list
+  matched field names exactly: `password` matched `password` and not
+  `metricsPassword`, so the hash reached the model through `get_server_info` —
+  a tool whose own description promises that passwords are redacted. A key is
+  now sensitive by what it _ends in_, on the name with `_` and `-` removed and
+  lower-cased, so every `<prefix>Password`, `<prefix>Secret`, `<prefix>Token`
+  and `<prefix>PrivateKey` the instance invents is covered without anybody
+  having to guess wg-easy's naming. `key` is deliberately not a suffix — it
+  would take `publicKey` and every `*_key` identifier with it.
+- **Response bodies have a ceiling, and the status is read before the body.**
+  Every answer was `await response.text()` with no bound: an instance that never
+  stops sending — or whatever answers in its place under
+  `WG_EASY_INSECURE_TLS`, or on a hostname `WG_EASY_URL` reaches by a typo — was
+  a process that never answered again. The request timeout does not help, it is
+  spent once the headers arrive. A success is now refused above 8 MiB (a
+  declared `content-length` before a byte is read, otherwise the reader is
+  cancelled at the ceiling), and a failure is read under its own 64 KiB ceiling
+  that cuts instead of refusing — so a `401` behind a reverse proxy's login page
+  is still a `401` with a credential hint, rather than "the response was too
+  large".
+- **A refused login is repeated from memory for ten seconds, not retried.** The
+  wg-easy API takes the admin credentials on every request, so every tool call
+  is a login attempt, and `401` is the one answer a model reads as transient and
+  retries. The answer now comes back from memory with a note saying so and when
+  the next attempt is possible. Only `401`; a `403` is a permission, not a
+  guess.
+- **What the instance wrote is cleaned on its way to the model.** Client names,
+  DNS entries and endpoints are free text somebody typed, and so are the field
+  names of a record that is passed through loosely. C0 and C1 control
+  characters, DEL and the BiDi override and isolate characters are removed from
+  all of them — an ESC starts a terminal escape sequence in whatever renders the
+  transcript, and a right-to-left override reorders the line around it. Error
+  bodies are labelled `(untrusted text from the instance)` and cut at 200
+  characters, which no result budget measured before. The two file tools are the
+  exception and stay byte-exact: a `.conf` and a QR-code SVG have to work as
+  configurations, so control characters in them are _named_ in a `warning` field
+  rather than removed.
+- **Caller input has a length.** Eight tool parameters were spliced into a query
+  string or a request body with no ceiling. Names and filters are bounded at
+  200 characters, addresses and dates at 64, list parameters at 64 entries, and
+  `mtu` and `persistentKeepalive` at the ranges those fields actually have. The
+  client id is bounded in its _pattern_ (`[0-9]{1,15}`, a safe integer by
+  construction): `/^\d+$/` looks like validation but four hundred nines are
+  digits, and `Number` of them is `Infinity`, which went out as
+  `GET /api/client/Infinity`.
+- **`WG_EASY_URL` is stored as it was parsed, and no diagnostic echoes a value.**
+  The environment string was kept whole, so a query or fragment left on the end
+  was glued in front of every request path; the origin and path are now stored.
+  Removing the trailing slashes was quadratic — 60 000 of them with a character
+  behind measured 1.2 s — and is an index walk. The non-http(s) message no
+  longer prints the scheme, because a hexadecimal key with a colon after it _is_
+  a URL whose scheme is the key, and the `ELICITATION` message quotes only a
+  short word-shaped value and describes anything else by its length: both sit
+  next to the credentials in every compose file.
+- **The supply chain around a release.** The publish job holds `id-token: write`
+  for npm Trusted Publishing and installed with `npm ci`, so every dependency's
+  lifecycle hook could run while that credential was available — it is
+  `--ignore-scripts` now. `mcp-publisher` was fetched from
+  `releases/latest/download` in the job that holds the registry OIDC token and
+  is pinned to `v1.8.1` with its published sha256 checked. Pull requests get
+  `actions/dependency-review-action`, which checks what a change _adds_ rather
+  than the tree as it stands. And the runtime image dropped npm but kept
+  corepack and yarn, which nothing here runs.
+- **The security documents describe the server that exists.** Both argued the
+  replay path away with "does not set `supportedProtocolVersions`, so it takes
+  the SDK's default list, which ends at `2025-11-25`" — untrue since the entry
+  point moved to `serveStdio`, which negotiates both eras, and the sentence
+  outlived the change by months. They now name the mechanism that actually
+  answers for it, the nonce mcp-approval spends on the first answer, and a test
+  holds them to it.
 
 ### Fixed
 
@@ -50,8 +136,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to `typecheck && build`, so `npm publish` from a workstation would have shipped
   a package whose tests were never run — the one moment that check matters most.
   CI was unaffected and stays the real gate; this closes the local path.
-
-[Unreleased]: https://github.com/ni-c/wg-easy-mcp/compare/v0.5.0...HEAD
+- **One malformed record no longer takes a whole listing down.** Every response
+  was read with a TypeScript cast, which checks nothing, while the SDK validates
+  each answer against the tool's output schema before it leaves. An `id` spelled
+  as a string, a `1e999` in `transferRx` (which `JSON.parse` reads as `Infinity`
+  and `z.number()` refuses) or a numeric `name` in a single row answered the
+  _whole_ `list_clients` with `Output validation error` and no cause — every good
+  record lost because of one bad one. Each typed field is now read with a check
+  of that exact type and left out when it does not hold, which is what "we did
+  not get a usable value" means in a record where every field is optional.
+- **The result budget measures the text it actually sends.** It measured the
+  compact serialisation and emitted the indented one plus the untrusted-data
+  paragraph: 53 329 characters measured against 86 949 emitted for the same
+  client list, so the 60 000-character ceiling held for a string nobody
+  received.
+- **Three tools declared an output schema their own answer could break.**
+  `z.object` emits `additionalProperties: false`, and the budget attaches a
+  `truncated` field that `get_client_config`, `get_client_qrcode` and
+  `get_server_info` did not declare — so a QR code past the ceiling, which is an
+  ordinary answer at 70 kB, was refused by every client that had loaded
+  `tools/list`, on the success path only. The harness lists the tools now, which
+  is what makes that class of defect visible at all; the third one was found by
+  the property test rather than by reading.
+- **A record field named `truncated` no longer overwrites the truncation note.**
+  The upstream record was spread over the note rather than under it, so the
+  instance could contradict the sentence that says the answer was shortened.
+- **`get_client_config` and `get_client_qrcode` no longer answer
+  `[object Object]`.** Both wrapped the body in `String()`, so a JSON error
+  object from a proxy became a configuration file containing the words "object
+  Object". What is not a string is now an error that names what arrived instead.
+- **A body of `null` no longer fails a guarded tool with a JavaScript error.**
+  `clientName` read `.name` off whatever came back, inside the arguments of the
+  dialog — so `delete_client` against an instance whose proxy answered `null`
+  reported "Cannot read properties of null" instead of asking, or of saying what
+  went wrong.
+- **The one-time link is read back with its types.** A numeric token or expiry
+  in the joined row left as a number and failed the whole answer; either is now
+  the `warning` case, which already says the link is live on the instance
+  whatever could be read back.
+- **`redactSecrets` no longer loses a `__proto__` key.** It built its result with
+  `out[key] = …`, and `__proto__` is legal JSON and an own property after
+  `JSON.parse`: the assignment ran the prototype setter, dropped the field and
+  replaced the prototype of the object that left the function with whatever the
+  instance sent. The boundary drops the key outright — nothing downstream
+  carries it faithfully in both channels — and the budget writes its slots with
+  `defineProperty`.
 
 ## [0.5.0] - 2026-09-03
 

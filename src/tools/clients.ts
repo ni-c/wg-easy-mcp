@@ -1,5 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 import {
+  orderedResourceKey,
   setResourceKey,
   type Approver,
   type ConfirmationStore,
@@ -11,11 +12,30 @@ import { errorResult, jsonResult, run, upstreamResult } from '../result.js';
 import type { WgEasyApi } from '../api.js';
 import { READ_ONLY } from './annotations.js';
 import {
+  cleanRecord,
+  hasControlCharacters,
+  objectOf,
+  shapeClient,
+  shapeClientList,
+  stringBody,
+  stringOf,
+} from '../boundary.js';
+import {
   clientRecord,
   markedClient,
   truncationNote,
   untrustedFields,
 } from '../output-schema.js';
+
+/**
+ * The largest client id this server will address.
+ *
+ * Fifteen digits, which is a safe integer by construction — the point is that
+ * no arithmetic happens between the check and the request path. wg-easy hands
+ * out ids from an auto-incrementing column, so this is not a limit anybody
+ * reaches; it is a limit on what the *string* branch below can turn into.
+ */
+const MAX_CLIENT_ID = 999_999_999_999_999;
 
 /**
  * A client id, as a number or as the decimal string a client may send instead.
@@ -25,17 +45,46 @@ import {
  * `Number(['3'])` is `3`, so `{clientId: true}` used to address the first
  * client on the instance. Nothing legitimate sends those, and on a VPN a
  * silently reinterpreted target is the wrong kind of forgiving.
+ *
+ * The digit run is bounded in the *pattern*, not after `Number()`. `/^\d+$/`
+ * looks like validation and is not one: four hundred nines are digits, and
+ * `Number` of them is `Infinity`, which passed a `> 0` check and went out as
+ * `GET /api/client/Infinity`. Seventeen digits are worse — they become a
+ * different, plausible number on the way to the path, so the request is a
+ * well-formed one against the wrong client.
  */
-const clientId = z
+const clientIdSchema = z
   .union([
-    z.number().int().positive(),
+    z.number().int().positive().max(MAX_CLIENT_ID),
     z
       .string()
-      .regex(/^\d+$/)
+      .regex(/^[0-9]{1,15}$/)
       .transform(Number)
       .refine((value) => value > 0),
   ])
   .describe('Numeric ID of the client (see list_clients)');
+
+/**
+ * Ceilings for what a caller may send.
+ *
+ * Every one of these is spliced into a request — a query string, a JSON body —
+ * and none of them had a length. They are set from what the field *is* rather
+ * than from a round number: a WireGuard MTU has a real range, a keepalive is a
+ * 16-bit interval, an address is an address, and a name is a label a person
+ * reads in a list.
+ */
+const MAX_NAME_LENGTH = 200;
+const MAX_ADDRESS_LENGTH = 64;
+const MAX_LIST_ENTRIES = 64;
+
+/** The note the two file tools attach when the file carries control bytes. */
+const fileWarning = z
+  .string()
+  .optional()
+  .describe(
+    'Present when the file contains control characters. It is passed through ' +
+      'unchanged regardless — it has to work as a configuration.'
+  );
 
 const confirmToken = z
   .string()
@@ -76,37 +125,40 @@ const UPDATABLE_FIELDS = [
   'dns',
 ] as const;
 
-/**
- * A client row as far as `generate_one_time_link` cares about it.
- *
- * `oneTimeLink` is a joined row on wg-easy 15 and a bare string on older
- * builds, so both shapes are accepted.
- */
-interface OneTimeLinkClient {
-  id?: number;
-  oneTimeLink?: { oneTimeLink?: string; expiresAt?: string } | string | null;
-}
-
-/**
- * The upstream answer as an object, so it can be spread into a result.
- *
- * wg-easy answers these endpoints with a client record, but the type says
- * `unknown` and an output schema is validated before the answer leaves. An
- * empty object is a result the schema accepts and a reader can see is empty;
- * spreading a string would produce one numbered key per character.
- */
-function asRecord(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
 /** The display name of a client, for the caller-supplied lines of a prompt. */
 async function clientName(api: WgEasyApi, id: number): Promise<string> {
   // Also the existence check: a missing client fails here with the API's own
   // error, before anybody is asked to approve something that cannot happen.
-  const client = (await api.get(`/api/client/${id}`)) as { name?: unknown };
-  return typeof client.name === 'string' ? client.name : `#${id}`;
+  //
+  // What comes back is read through the boundary, not off a cast. A body of
+  // `null` — legal JSON, and what a proxy in front of the instance answers on a
+  // route it does not know — used to throw "Cannot read properties of null"
+  // from inside the dialog's own arguments, so the tool failed with a
+  // JavaScript error rather than with a sentence, before anybody was asked
+  // anything.
+  const client = cleanRecord(await api.get(`/api/client/${id}`));
+  return stringOf(client.name) ?? `#${id}`;
+}
+
+/**
+ * A file answer — a `.conf` or a QR-code SVG — with a note when it carries
+ * control characters.
+ *
+ * The file itself is passed through **byte for byte**: it has to round-trip
+ * into a WireGuard client, and a configuration that has been quietly edited on
+ * the way is worse than one that is refused. So the control characters are
+ * named rather than removed, which is the opposite of what happens to a client
+ * name, and for the opposite reason.
+ */
+function fileResult(text: string): Record<string, unknown> {
+  return hasControlCharacters(text)
+    ? {
+        warning:
+          'This file contains control characters. It is passed through ' +
+          'unchanged because it has to work as a configuration, but do not ' +
+          'render it into a terminal without escaping it.',
+      }
+    : {};
 }
 
 export function registerClientTools(
@@ -124,6 +176,7 @@ export function registerClientTools(
       inputSchema: z.object({
         filter: z
           .string()
+          .max(MAX_NAME_LENGTH)
           .optional()
           .describe('Optional name filter (substring match)'),
         sort: z
@@ -136,6 +189,14 @@ export function registerClientTools(
         ...untrustedFields,
         truncated: truncationNote,
         count: z.number().int().describe('Clients in this answer.'),
+        skipped: z
+          .number()
+          .int()
+          .optional()
+          .describe(
+            'Entries the instance sent that were not client records. Present ' +
+              'only when there were any.'
+          ),
         clients: z.array(clientRecord),
       }),
     },
@@ -150,10 +211,18 @@ export function registerClientTools(
         // `{result: …}` for a 2025-era client, so the tool would answer in two
         // different shapes depending on who asked. `count` comes with the
         // wrapper, and is what a truncated answer is read against.
-        const clients = redactSecrets(await api.get(`/api/client${suffix}`));
-        const list = Array.isArray(clients) ? clients : [];
+        const answer = redactSecrets(await api.get(`/api/client${suffix}`));
+        // Shaped, not cast. One `id` spelled as a string, a `1e999` in
+        // `transferRx` or a numeric `name` in a single row used to answer the
+        // *whole* listing with `Output validation error` and no cause — every
+        // good record lost because of one bad one.
+        const { clients, skipped } = shapeClientList(answer);
         return upstreamResult(
-          { count: list.length, clients: list },
+          {
+            count: clients.length,
+            ...(skipped > 0 ? { skipped } : {}),
+            clients,
+          },
           'Narrow the result with the filter argument, or fetch a single client with get_client.'
         );
       })
@@ -171,14 +240,14 @@ export function registerClientTools(
         'the transcript. Use get_client_config or get_client_qrcode when the ' +
         'key is genuinely wanted: handing a peer its configuration is what ' +
         'those two are for.',
-      inputSchema: z.object({ clientId }),
+      inputSchema: z.object({ clientId: clientIdSchema }),
       annotations: READ_ONLY,
       outputSchema: markedClient,
     },
     ({ clientId }) =>
       run(async () =>
         upstreamResult(
-          asRecord(redactSecrets(await api.get(`/api/client/${clientId}`))),
+          shapeClient(redactSecrets(await api.get(`/api/client/${clientId}`))),
           'Fetch the configuration file separately with get_client_config.'
         )
       )
@@ -191,9 +260,14 @@ export function registerClientTools(
       description:
         'Create a new WireGuard client. Keys and IP addresses are generated by wg-easy. Returns the new client ID. Asks a person first; where the client cannot show a dialog, call once to receive a token and again with it.',
       inputSchema: z.object({
-        name: z.string().min(1).describe('Display name of the new client'),
+        name: z
+          .string()
+          .min(1)
+          .max(MAX_NAME_LENGTH)
+          .describe('Display name of the new client'),
         expiresAt: z
           .string()
+          .max(MAX_ADDRESS_LENGTH)
           .optional()
           .describe(
             'Optional expiry date as ISO string (e.g. 2026-12-31). Omit for no expiry.'
@@ -228,7 +302,12 @@ export function registerClientTools(
               'It receives its own key pair and can connect to every ' +
               'network this VPN reaches. Deleting it later does not undo a ' +
               'connection it made in the meantime.',
-            resourceKey: setResourceKey('create_client', [
+            // A (name, expiry) tuple, not a set: a client name is free text,
+            // so a name that spells a date paired with an expiry that spells
+            // the name would sort to the same set as the other way round, and
+            // one token would confirm both. `orderedResourceKey` binds each
+            // part to its place.
+            resourceKey: orderedResourceKey('create_client', [
               name,
               expiresAt ?? '',
             ]),
@@ -249,7 +328,7 @@ export function registerClientTools(
         if (outcome.decision === 'pending') return outcome.result;
 
         return upstreamResult(
-          asRecord(
+          shapeClient(
             redactSecrets(
               await api.post('/api/client', {
                 name,
@@ -269,48 +348,71 @@ export function registerClientTools(
       description:
         'Update a WireGuard client. Only the provided fields are changed; all other settings are preserved. Asks a person first; where the client cannot show a dialog, call once to receive a token and again with it.',
       inputSchema: z.object({
-        clientId,
+        clientId: clientIdSchema,
         confirm_token: confirmToken,
-        name: z.string().min(1).optional().describe('New display name'),
+        name: z
+          .string()
+          .min(1)
+          .max(MAX_NAME_LENGTH)
+          .optional()
+          .describe('New display name'),
         enabled: z
           .boolean()
           .optional()
           .describe('Enable or disable the client'),
         expiresAt: z
           .string()
+          .max(MAX_ADDRESS_LENGTH)
           .describe('Expiry date as ISO string, or null to remove the expiry')
           .nullable()
           .optional(),
         ipv4Address: z
           .string()
+          .max(MAX_ADDRESS_LENGTH)
           .optional()
           .describe('IPv4 address of the client'),
         ipv6Address: z
           .string()
+          .max(MAX_ADDRESS_LENGTH)
           .optional()
           .describe('IPv6 address of the client'),
         allowedIps: z
-          .array(z.string())
+          .array(z.string().max(MAX_ADDRESS_LENGTH))
+          .max(MAX_LIST_ENTRIES)
           .nullable()
           .optional()
           .describe(
             'CIDRs routed through the tunnel on the client side, or null to use the server default'
           ),
         serverAllowedIps: z
-          .array(z.string())
+          .array(z.string().max(MAX_ADDRESS_LENGTH))
+          .max(MAX_LIST_ENTRIES)
           .optional()
           .describe('Additional CIDRs the server routes to this client'),
         dns: z
-          .array(z.string())
+          .array(z.string().max(MAX_ADDRESS_LENGTH))
+          .max(MAX_LIST_ENTRIES)
           .nullable()
           .optional()
           .describe(
             'DNS servers for the client, or null to use the server default'
           ),
-        mtu: z.number().int().optional().describe('MTU for the client'),
+        // The real range of a WireGuard MTU: below 1280 an IPv6 tunnel cannot
+        // carry a minimum-sized packet, and 9000 is a jumbo frame. An unbounded
+        // integer here is an unbounded number in the request body, and a
+        // plausible-looking one is a tunnel that silently stops passing traffic.
+        mtu: z
+          .number()
+          .int()
+          .min(1280)
+          .max(9000)
+          .optional()
+          .describe('MTU for the client (1280–9000)'),
         persistentKeepalive: z
           .number()
           .int()
+          .min(0)
+          .max(65535)
           .optional()
           .describe('Persistent keepalive interval in seconds (0 = off)'),
       }),
@@ -330,8 +432,11 @@ export function registerClientTools(
       run(async () => {
         // Bound to the exact edit, not merely to the client: approving a name
         // change must not license a later call that moves the address or
-        // widens serverAllowedIps. `setResourceKey` sorts and fingerprints,
-        // so the key does not depend on the order the fields arrived in.
+        // widens serverAllowedIps. This is a genuine set, so `setResourceKey`
+        // (sort, then fingerprint) is the right key and stays: every part is a
+        // self-labelled `field=value` pair, the order the fields arrived in
+        // carries no meaning, and the numeric id cannot be mistaken for one
+        // of them.
         const edit = Object.entries(changes)
           .filter(([, value]) => value !== undefined)
           .map(([key, value]) => `${key}=${JSON.stringify(value)}`);
@@ -367,10 +472,13 @@ export function registerClientTools(
 
         // The API expects the complete update object, so merge the partial
         // input into the current client state.
-        const current = (await api.get(`/api/client/${clientId}`)) as Record<
-          string,
-          unknown
-        >;
+        //
+        // `cleanRecord`, not a cast: a body that is not an object — `null`, a
+        // string from a proxy, an array — made `current[field]` either throw or
+        // read characters off a string into the update. An empty record merges
+        // to a body of nulls plus the caller's fields, which is the honest
+        // answer when the instance did not describe the client it has.
+        const current = cleanRecord(await api.get(`/api/client/${clientId}`));
         const body: Record<string, unknown> = {};
         for (const field of UPDATABLE_FIELDS) {
           body[field] = current[field] ?? null;
@@ -379,7 +487,7 @@ export function registerClientTools(
           if (value !== undefined) body[key] = value;
         }
         return upstreamResult(
-          asRecord(
+          shapeClient(
             redactSecrets(await api.post(`/api/client/${clientId}`, body))
           ),
           'Re-read the client with get_client.'
@@ -393,7 +501,10 @@ export function registerClientTools(
       title: 'Enable WireGuard client',
       description:
         'Enable a WireGuard client so it can connect again. Asks a person first; where the client cannot show a dialog, call once to receive a token and again with it.',
-      inputSchema: z.object({ clientId, confirm_token: confirmToken }),
+      inputSchema: z.object({
+        clientId: clientIdSchema,
+        confirm_token: confirmToken,
+      }),
       annotations: {
         // Restores access rather than removing it, so nothing here is
         // destructive.
@@ -443,7 +554,7 @@ export function registerClientTools(
         if (outcome.decision === 'pending') return outcome.result;
 
         return upstreamResult(
-          asRecord(
+          shapeClient(
             redactSecrets(await api.post(`/api/client/${clientId}/enable`))
           ),
           'Re-read the client with get_client.'
@@ -457,7 +568,7 @@ export function registerClientTools(
       title: 'Disable WireGuard client',
       description:
         'Disable a WireGuard client. The client keeps its configuration but can no longer connect.',
-      inputSchema: z.object({ clientId }),
+      inputSchema: z.object({ clientId: clientIdSchema }),
       annotations: {
         // Not destructive: the client and its keys stay, only the tunnel stops.
         // enable_client puts it back.
@@ -476,7 +587,7 @@ export function registerClientTools(
     ({ clientId }) =>
       run(async () =>
         upstreamResult(
-          asRecord(
+          shapeClient(
             redactSecrets(await api.post(`/api/client/${clientId}/disable`))
           ),
           'Re-read the client with get_client.'
@@ -491,7 +602,7 @@ export function registerClientTools(
       description:
         'Permanently delete a WireGuard client. This is irreversible: the client loses VPN access and its keys cannot be restored. Asks a person first; where the client cannot show a dialog, call once to receive a token and again with it.',
       inputSchema: z.object({
-        clientId,
+        clientId: clientIdSchema,
         confirm_token: confirmToken,
       }),
       annotations: {
@@ -546,7 +657,7 @@ export function registerClientTools(
       title: 'Get WireGuard client configuration',
       description:
         'Get the WireGuard configuration file (wg .conf format) for a client. SENSITIVE: the output contains the client private key — treat it as a secret and do not repeat it unnecessarily.',
-      inputSchema: z.object({ clientId }),
+      inputSchema: z.object({ clientId: clientIdSchema }),
       annotations: READ_ONLY,
       // The file goes in a field rather than being the result. A scalar root is
       // rewritten to `{result: …}` for a 2025-era client, so the answer would
@@ -554,22 +665,28 @@ export function registerClientTools(
       // be able to find by name rather than by position.
       outputSchema: z.object({
         ...untrustedFields,
+        // `truncated` is declared because the budget can add it, and a
+        // `z.object` emits `additionalProperties: false`: a field the helper
+        // attaches and the schema does not name is refused by every client that
+        // has loaded `tools/list`, on the success path only.
+        truncated: truncationNote,
+        warning: fileWarning,
         configuration: z
           .string()
           .describe('The wg .conf file. Contains the client private key.'),
       }),
     },
     ({ clientId }) =>
-      run(async () =>
-        upstreamResult(
-          {
-            configuration: String(
-              await api.get(`/api/client/${clientId}/configuration`)
-            ),
-          },
+      run(async () => {
+        const configuration = stringBody(
+          await api.get(`/api/client/${clientId}/configuration`),
+          'a WireGuard configuration file'
+        );
+        return upstreamResult(
+          { configuration, ...fileResult(configuration) },
           'Download the configuration from the wg-easy UI if it was cut off.'
-        )
-      )
+        );
+      })
   );
 
   server.registerTool(
@@ -578,20 +695,29 @@ export function registerClientTools(
       title: 'Get WireGuard client QR code',
       description:
         'Get the client configuration as a QR code (SVG markup) for scanning with the WireGuard mobile app. SENSITIVE: the QR code encodes the client private key — treat it as a secret.',
-      inputSchema: z.object({ clientId }),
+      inputSchema: z.object({ clientId: clientIdSchema }),
       annotations: READ_ONLY,
       outputSchema: z.object({
         ...untrustedFields,
+        // A QR-code SVG is routinely tens of kilobytes, so this is the tool the
+        // budget shortens most often — and the one whose closed schema then
+        // refused its own answer.
+        truncated: truncationNote,
+        warning: fileWarning,
         svg: z.string().describe('SVG markup. Encodes the client private key.'),
       }),
     },
     ({ clientId }) =>
-      run(async () =>
-        upstreamResult(
-          { svg: String(await api.get(`/api/client/${clientId}/qrcode.svg`)) },
+      run(async () => {
+        const svg = stringBody(
+          await api.get(`/api/client/${clientId}/qrcode.svg`),
+          'QR-code SVG markup'
+        );
+        return upstreamResult(
+          { svg, ...fileResult(svg) },
           'Use get_client_config instead if the QR code markup was cut off.'
-        )
-      )
+        );
+      })
   );
 
   server.registerTool(
@@ -609,7 +735,10 @@ export function registerClientTools(
         'still exists on the instance and is downloadable by anyone who has ' +
         'the URL. Say so rather than reporting that nothing happened, and ' +
         'point at the wg-easy UI, where it can be revoked.',
-      inputSchema: z.object({ clientId, confirm_token: confirmToken }),
+      inputSchema: z.object({
+        clientId: clientIdSchema,
+        confirm_token: confirmToken,
+      }),
       annotations: {
         // Destroys nothing, and that is the whole difficulty with this one: it
         // mints a URL that hands the full client configuration — private key
@@ -689,7 +818,7 @@ export function registerClientTools(
         // reads that as "no link was made" while an unauthenticated URL
         // serving the full configuration, private key included, is live for
         // the next five minutes. Report the mint first, then the failure.
-        let clients: OneTimeLinkClient[];
+        let clients: unknown;
         try {
           // The **list**, not `/api/client/{id}`. wg-easy joins the one-time
           // link onto the client row in `findMany` and not in `findById`, so
@@ -699,7 +828,7 @@ export function registerClientTools(
           // returned by the API" on every successful call, and what the tool's
           // own description used to explain as wg-easy answering HTTP 500. It
           // does not: the POST answers 200 and the link works.
-          clients = (await api.get('/api/client')) as OneTimeLinkClient[];
+          clients = await api.get('/api/client');
         } catch (error) {
           const message =
             error instanceof Error ? error.message : String(error);
@@ -715,16 +844,26 @@ export function registerClientTools(
             'Read the client list with list_clients.'
           );
         }
-        const found = Array.isArray(clients)
-          ? clients.find((entry) => entry?.id === clientId)
-          : undefined;
+        const found = shapeClientList(clients).clients.find(
+          (entry) => entry.id === clientId
+        );
         // Accepts both shapes: 15.4.0 nests the value in a joined row, older
-        // builds put the string on the client directly.
+        // builds put the string on the client directly. Either way the value
+        // has to *be* a string — the schema below types `oneTimeLink` and
+        // `expiresAt`, and a number where the token belongs used to leave as a
+        // number and fail the whole answer. A token that is not a string is a
+        // token this server cannot hand on, which is the `warning` case: the
+        // link is live on the instance regardless.
         const record = found?.oneTimeLink;
-        const link = typeof record === 'string' ? record : record?.oneTimeLink;
+        const link =
+          typeof record === 'string'
+            ? record
+            : stringOf(objectOf(record).oneTimeLink);
         const expiresAt =
-          typeof record === 'string' ? null : (record?.expiresAt ?? null);
-        if (!link) {
+          typeof record === 'string'
+            ? null
+            : (stringOf(objectOf(record).expiresAt) ?? null);
+        if (link === undefined || link === '') {
           return upstreamResult(
             {
               created: true,
