@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 
 import type { CallToolResult } from '@modelcontextprotocol/client';
+import { orderedResourceKey, setResourceKey } from 'mcp-approval';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -664,6 +665,60 @@ describe('the other three guarded tools', () => {
     expect(prompts[0]).toContain('without logging in');
     expect(result.isError).toBe(true);
     expect(calls.some((c) => c.init?.method === 'POST')).toBe(false);
+  });
+
+  it('binds the create approval to the positions of name and expiry', async () => {
+    // A client name is free text. Under a set key, name="2026-12-31" with
+    // expiry "bob" and name="bob" with expiry "2026-12-31" sorted to the same
+    // key, so a token for one pairing also confirmed the other. The key is
+    // positional now: the swapped call must be a fresh question, not a
+    // confirmed create.
+    const calls = stubFetch(() =>
+      jsonResponse({ success: true, clientId: 10 })
+    );
+    const client = await connect();
+
+    const first = (await client.callTool({
+      name: 'create_client',
+      arguments: { name: '2026-12-31', expiresAt: 'bob' },
+    })) as CallToolResult;
+    expect(resultText(first)).toContain('confirm_token=');
+
+    const swapped = (await client.callTool({
+      name: 'create_client',
+      arguments: {
+        name: 'bob',
+        expiresAt: '2026-12-31',
+        confirm_token: tokenOf(first),
+      },
+    })) as CallToolResult;
+
+    expect(swapped.isError).toBe(true);
+    expect(resultText(swapped)).toContain('issued for different arguments');
+    expect(calls.some((c) => c.init?.method === 'POST')).toBe(false);
+
+    // And the same pairing, in its own order, still goes through.
+    const same = (await client.callTool({
+      name: 'create_client',
+      arguments: {
+        name: '2026-12-31',
+        expiresAt: 'bob',
+        confirm_token: tokenOf(first),
+      },
+    })) as CallToolResult;
+    expect(same.isError).toBeFalsy();
+    expect(calls.some((c) => c.init?.method === 'POST')).toBe(true);
+  });
+
+  it('keys create_client on a tuple, where a swap is a different resource', () => {
+    // The library half of the test above: the parts in the other order do
+    // not fingerprint to the same key, which is what setResourceKey did.
+    expect(orderedResourceKey('create_client', ['2026-12-31', 'bob'])).not.toBe(
+      orderedResourceKey('create_client', ['bob', '2026-12-31'])
+    );
+    expect(setResourceKey('create_client', ['2026-12-31', 'bob'])).toBe(
+      setResourceKey('create_client', ['bob', '2026-12-31'])
+    );
   });
 
   it('binds the update approval to the exact edit, not to the client', async () => {

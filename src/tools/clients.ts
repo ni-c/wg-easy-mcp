@@ -1,5 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 import {
+  orderedResourceKey,
   setResourceKey,
   type Approver,
   type ConfirmationStore,
@@ -228,7 +229,12 @@ export function registerClientTools(
               'It receives its own key pair and can connect to every ' +
               'network this VPN reaches. Deleting it later does not undo a ' +
               'connection it made in the meantime.',
-            resourceKey: setResourceKey('create_client', [
+            // A (name, expiry) tuple, not a set: a client name is free text,
+            // so a name that spells a date paired with an expiry that spells
+            // the name would sort to the same set as the other way round, and
+            // one token would confirm both. `orderedResourceKey` binds each
+            // part to its place.
+            resourceKey: orderedResourceKey('create_client', [
               name,
               expiresAt ?? '',
             ]),
@@ -330,8 +336,11 @@ export function registerClientTools(
       run(async () => {
         // Bound to the exact edit, not merely to the client: approving a name
         // change must not license a later call that moves the address or
-        // widens serverAllowedIps. `setResourceKey` sorts and fingerprints,
-        // so the key does not depend on the order the fields arrived in.
+        // widens serverAllowedIps. This is a genuine set, so `setResourceKey`
+        // (sort, then fingerprint) is the right key and stays: every part is a
+        // self-labelled `field=value` pair, the order the fields arrived in
+        // carries no meaning, and the numeric id cannot be mistaken for one
+        // of them.
         const edit = Object.entries(changes)
           .filter(([, value]) => value !== undefined)
           .map(([key, value]) => `${key}=${JSON.stringify(value)}`);

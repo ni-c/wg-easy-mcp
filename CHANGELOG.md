@@ -7,25 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- #region changelog -->
 
-## [Unreleased]
+## [0.6.0] - 2026-09-07
 
 ### Added
 
 - A demo GIF in the README and on the documentation home page, recorded from
   `docs/demo.tape` with no credentials: the tool list, the same list narrowed by
   the `essential` preset, and the startup abort a mistyped tool name produces.
-
-### Changed
-
-- The tool reference marks the `essential` preset and the tools that ask a
-  person before they act, per tool rather than only in the introduction. A test
-  keeps both sets in step with the code.
-- `homepage` in `package.json` points at the documentation site rather than at
-  the README anchor on GitHub. It is what npm shows next to the package, and
-  every one of these servers has had a documentation site for weeks.
-
-### Added
-
 - The server introduces itself in full. `title`, `description`, `websiteUrl` and
   `icons` now travel with `name` and `version`, so a client that shows a server
   to a person has something to show. All four were already in `server.json` for
@@ -38,6 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The tool reference marks the `essential` preset and the tools that ask a
+  person before they act, per tool rather than only in the introduction. A test
+  keeps both sets in step with the code.
+- `homepage` in `package.json` points at the documentation site rather than at
+  the README anchor on GitHub. It is what npm shows next to the package, and
+  every one of these servers has had a documentation site for weeks.
 - Source maps are no longer published in the npm tarball. Node reads them only
   under `--enable-source-maps`, which nothing here sets, and the maps pointed at
   a `src/` this package does not ship — so a stack trace under that flag named a
@@ -51,7 +45,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a package whose tests were never run — the one moment that check matters most.
   CI was unaffected and stays the real gate; this closes the local path.
 
-[Unreleased]: https://github.com/ni-c/wg-easy-mcp/compare/v0.5.0...HEAD
+### Security
+
+- **mcp-approval 0.8.2.** A sealed dialog answer is single-use since 0.8.1: the
+  same `requestState` presented again within its lifetime used to be accepted
+  again, and with a resource key that is the same every time — a whole stream, a
+  fixed set of targets — every replay landed. npm users on `^0.8.0` already had
+  the fix; the Docker image is built from the lockfile and carried 0.8.0 until
+  this release.
+- **Approval keys bound to positions.** `create_client` keyed its approval on
+  the set {name, expiry}, and a set has no positions: a client name is free
+  text, so a name that spells a date paired with an expiry that spells the name
+  sorted to the same key, and a token obtained for one pairing also confirmed
+  the other. The key now comes from `orderedResourceKey` in mcp-approval 0.8.2,
+  which binds each part to its place. `update_client` stays on `setResourceKey`
+  on purpose: its parts are the numeric id plus self-labelled `field=value`
+  pairs, which is a set by nature — no swap of two parts describes a different
+  edit, and an id cannot be mistaken for a labelled pair.
 
 ## [0.5.0] - 2026-09-03
 
