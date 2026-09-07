@@ -73,7 +73,7 @@ describe('tool registration', () => {
     stubFetch(() => jsonResponse({}));
     const client = await connect();
     const { tools } = await client.listTools();
-    const names = tools.map((t) => t.name).sort();
+    const names = tools.map((t) => t.name).toSorted();
     expect(names).toEqual([
       'create_client',
       'delete_client',
@@ -226,7 +226,7 @@ describe('tool registration', () => {
     const guarded = tools
       .filter((tool) => 'confirm_token' in (tool.inputSchema.properties ?? {}))
       .map((tool) => tool.name)
-      .sort();
+      .toSorted();
     expect(guarded).toEqual([
       'create_client',
       'delete_client',
@@ -1142,13 +1142,13 @@ describe('get_server_info', () => {
     );
     const client = await connect();
 
-    const listed_ = resultJson(
+    const listedClients = resultJson(
       (await client.callTool({
         name: 'list_clients',
         arguments: {},
       })) as CallToolResult
     ) as { clients: Record<string, unknown>[] };
-    const listed = listed_.clients;
+    const listed = listedClients.clients;
 
     expect(listed[0]!.privateKey).toBe('[redacted]');
     expect(listed[0]!.preSharedKey).toBe('[redacted]');
@@ -1205,13 +1205,13 @@ describe('get_server_info', () => {
     );
     const client = await connect();
 
-    const listed_ = resultJson(
+    const listedClients = resultJson(
       (await client.callTool({
         name: 'list_clients',
         arguments: {},
       })) as CallToolResult
     ) as { clients: Record<string, Record<string, unknown>>[] };
-    const listed = listed_.clients;
+    const listed = listedClients.clients;
 
     expect(listed[0]!.oneTimeLink!.oneTimeLink).toBe('[redacted]');
     expect(listed[0]!.oneTimeLink!.expiresAt).toBe('2026-09-02T10:41:13.571Z');
@@ -1223,13 +1223,13 @@ describe('get_server_info', () => {
     stubFetch(() => jsonResponse([{ id: 1, oneTimeLink: null }]));
     const client = await connect();
 
-    const listed_ = resultJson(
+    const listedClients = resultJson(
       (await client.callTool({
         name: 'list_clients',
         arguments: {},
       })) as CallToolResult
     ) as { clients: Record<string, unknown>[] };
-    const listed = listed_.clients;
+    const listed = listedClients.clients;
 
     expect(listed[0]!.oneTimeLink).toBeNull();
   });

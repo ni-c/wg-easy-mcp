@@ -95,7 +95,7 @@ export async function toolNames(
   const client = await connect(overrides);
   const { tools } = await client.listTools();
   await client.close();
-  return tools.map((tool) => tool.name).sort();
+  return tools.map((tool) => tool.name).toSorted();
 }
 
 export function resultText(result: CallToolResult): string {

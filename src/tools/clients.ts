@@ -26,7 +26,7 @@ import {
  * client on the instance. Nothing legitimate sends those, and on a VPN a
  * silently reinterpreted target is the wrong kind of forgiving.
  */
-const clientId = z
+const clientIdSchema = z
   .union([
     z.number().int().positive(),
     z
@@ -171,7 +171,7 @@ export function registerClientTools(
         'the transcript. Use get_client_config or get_client_qrcode when the ' +
         'key is genuinely wanted: handing a peer its configuration is what ' +
         'those two are for.',
-      inputSchema: z.object({ clientId }),
+      inputSchema: z.object({ clientId: clientIdSchema }),
       annotations: READ_ONLY,
       outputSchema: markedClient,
     },
@@ -269,7 +269,7 @@ export function registerClientTools(
       description:
         'Update a WireGuard client. Only the provided fields are changed; all other settings are preserved. Asks a person first; where the client cannot show a dialog, call once to receive a token and again with it.',
       inputSchema: z.object({
-        clientId,
+        clientId: clientIdSchema,
         confirm_token: confirmToken,
         name: z.string().min(1).optional().describe('New display name'),
         enabled: z
@@ -393,7 +393,10 @@ export function registerClientTools(
       title: 'Enable WireGuard client',
       description:
         'Enable a WireGuard client so it can connect again. Asks a person first; where the client cannot show a dialog, call once to receive a token and again with it.',
-      inputSchema: z.object({ clientId, confirm_token: confirmToken }),
+      inputSchema: z.object({
+        clientId: clientIdSchema,
+        confirm_token: confirmToken,
+      }),
       annotations: {
         // Restores access rather than removing it, so nothing here is
         // destructive.
@@ -457,7 +460,7 @@ export function registerClientTools(
       title: 'Disable WireGuard client',
       description:
         'Disable a WireGuard client. The client keeps its configuration but can no longer connect.',
-      inputSchema: z.object({ clientId }),
+      inputSchema: z.object({ clientId: clientIdSchema }),
       annotations: {
         // Not destructive: the client and its keys stay, only the tunnel stops.
         // enable_client puts it back.
@@ -491,7 +494,7 @@ export function registerClientTools(
       description:
         'Permanently delete a WireGuard client. This is irreversible: the client loses VPN access and its keys cannot be restored. Asks a person first; where the client cannot show a dialog, call once to receive a token and again with it.',
       inputSchema: z.object({
-        clientId,
+        clientId: clientIdSchema,
         confirm_token: confirmToken,
       }),
       annotations: {
@@ -546,7 +549,7 @@ export function registerClientTools(
       title: 'Get WireGuard client configuration',
       description:
         'Get the WireGuard configuration file (wg .conf format) for a client. SENSITIVE: the output contains the client private key — treat it as a secret and do not repeat it unnecessarily.',
-      inputSchema: z.object({ clientId }),
+      inputSchema: z.object({ clientId: clientIdSchema }),
       annotations: READ_ONLY,
       // The file goes in a field rather than being the result. A scalar root is
       // rewritten to `{result: …}` for a 2025-era client, so the answer would
@@ -578,7 +581,7 @@ export function registerClientTools(
       title: 'Get WireGuard client QR code',
       description:
         'Get the client configuration as a QR code (SVG markup) for scanning with the WireGuard mobile app. SENSITIVE: the QR code encodes the client private key — treat it as a secret.',
-      inputSchema: z.object({ clientId }),
+      inputSchema: z.object({ clientId: clientIdSchema }),
       annotations: READ_ONLY,
       outputSchema: z.object({
         ...untrustedFields,
@@ -609,7 +612,10 @@ export function registerClientTools(
         'still exists on the instance and is downloadable by anyone who has ' +
         'the URL. Say so rather than reporting that nothing happened, and ' +
         'point at the wg-easy UI, where it can be revoked.',
-      inputSchema: z.object({ clientId, confirm_token: confirmToken }),
+      inputSchema: z.object({
+        clientId: clientIdSchema,
+        confirm_token: confirmToken,
+      }),
       annotations: {
         // Destroys nothing, and that is the whole difficulty with this one: it
         // mints a URL that hands the full client configuration — private key
