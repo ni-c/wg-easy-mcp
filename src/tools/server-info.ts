@@ -3,9 +3,10 @@ import { z } from 'zod';
 
 import type { WgEasyApi } from '../api.js';
 import { READ_ONLY } from './annotations.js';
+import { cleanRecord, cleanText, kindOf } from '../boundary.js';
 import { redactSecrets } from '../redact.js';
 import { run, upstreamResult } from '../result.js';
-import { untrustedFields } from '../output-schema.js';
+import { truncationNote, untrustedFields } from '../output-schema.js';
 
 /**
  * A section of the answer, or the note saying why it is absent.
@@ -38,6 +39,13 @@ export function registerServerInfoTools(
       annotations: READ_ONLY,
       outputSchema: z.object({
         ...untrustedFields,
+        // Three sections of settings, each of which the instance can make
+        // arbitrarily long — so the budget can shorten this answer, and a
+        // `z.object` that does not name the field it attaches refuses the whole
+        // result for any client that has loaded `tools/list`. Found by the
+        // property test, not by reading: the two file tools had been given the
+        // field and this one was written in another file.
+        truncated: truncationNote,
         information: section.describe('Release and update status.'),
         general: section.describe('Instance-wide settings.'),
         interface: section.describe('The WireGuard interface configuration.'),
@@ -56,11 +64,30 @@ export function registerServerInfoTools(
         const result: Record<string, unknown> = {};
         for (const [key, path] of Object.entries(sections)) {
           try {
-            result[key] = redactSecrets(await api.get(path));
+            const answer = redactSecrets(await api.get(path));
+            // A section has to be an object: the schema above says so, and one
+            // section that is a string — a maintenance page, an HTML body a
+            // proxy served under 200 — used to fail the whole call, which is
+            // the one thing this tool's per-section design exists to prevent.
+            // Named, not swallowed: `error` is a legitimate value of a section.
+            result[key] =
+              answer !== null &&
+              typeof answer === 'object' &&
+              !Array.isArray(answer)
+                ? cleanRecord(answer)
+                : {
+                    error:
+                      `The wg-easy instance answered ${kindOf(answer)} for ` +
+                      `${path}, where a settings object was expected.`,
+                  };
           } catch (error) {
-            result[key] = {
-              error: error instanceof Error ? error.message : String(error),
-            };
+            // This sentence is mostly the server's own ("… failed with HTTP
+            // 500"), but not entirely: a TLS failure names what the certificate
+            // claimed, and undici quotes values back. Cleaned and cut, not
+            // labelled — the label belongs on a body, not on a diagnostic.
+            const message =
+              error instanceof Error ? error.message : String(error);
+            result[key] = { error: cleanText(message).slice(0, 500) };
           }
         }
         return upstreamResult(

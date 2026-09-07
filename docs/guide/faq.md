@@ -65,11 +65,33 @@ That is the marker described in [Security](/guide/security). It tells the model
 that client names and similar free-form fields are data, not instructions. The
 actual payload follows after a blank line.
 
-## The output says "(truncated, N more characters)"
+## The answer carries a `truncated` field
 
-An upstream payload exceeded the 60 000-character budget. The message names the
-call that fetches the remainder — usually narrowing `list_clients` with `filter`,
-or switching to `get_client` for one specific client.
+An upstream payload exceeded the 60 000-character budget, so the longest strings
+were shortened (`… (N more characters omitted)`) or entries were dropped from the
+longest list. `truncated.fields` names every path that was cut with what
+survived and what was there, and `truncated.note` names the call that fetches
+the remainder — usually narrowing `list_clients` with `filter`, or switching to
+`get_client` for one specific client.
+
+## The output says the login is "repeated from memory"
+
+The instance refused the credentials, and that answer is repeated for ten
+seconds instead of being tried again. Every tool call carries the admin
+credentials, so every call is a login attempt, and a model that retries a `401`
+turns one wrong password into a stream of failed logins from the host you
+administer the VPN from. The message says when the next real attempt is
+possible. Fix `WG_EASY_USERNAME`/`WG_EASY_PASSWORD` and restart the server; note
+that the wg-easy API does not work at all while 2FA is enabled for the account.
+
+## The output says the instance answered past a ceiling
+
+A successful response body larger than 8 MiB is refused rather than read: the
+other end of the connection is not always wg-easy — a typo in `WG_EASY_URL`
+reaches whoever owns that name, and `WG_EASY_INSECURE_TLS` trusts whatever
+answers — and a body that never ends would otherwise be a server that never
+answers again. Narrow the request, or check that `WG_EASY_URL` points where you
+think it does.
 
 ## Does it work with wg-easy v14 or older?
 

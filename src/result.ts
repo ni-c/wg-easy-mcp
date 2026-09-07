@@ -4,19 +4,18 @@ import type {
 } from '@modelcontextprotocol/server';
 
 import { WgEasyApiError } from './api.js';
-
-export function textResult(text: string): CallToolResult {
-  return { content: [{ type: 'text', text }] };
-}
+import { cleanText } from './boundary.js';
 
 export function errorResult(text: string): CallToolResult {
   return { content: [{ type: 'text', text }], isError: true };
 }
 
 /**
- * Total size budget for a single upstream payload. Client names, DNS entries
- * and `serverEndpoint` are free-form strings chosen by whoever administers the
- * VPN, so a single record can be arbitrarily large.
+ * Total size budget for a single upstream payload, measured on the text that is
+ * actually sent.
+ *
+ * Client names, DNS entries and `serverEndpoint` are free-form strings chosen by
+ * whoever administers the VPN, so a single record can be arbitrarily large.
  */
 const MAX_UPSTREAM_LENGTH = 60_000;
 
@@ -40,6 +39,11 @@ export function jsonResult(data: Record<string, unknown>): CallToolResult {
   };
 }
 
+/** The text block of an upstream answer, as it goes out. */
+function render(payload: Record<string, unknown>): string {
+  return `${UNTRUSTED_MARKER}\n\n${JSON.stringify(payload, null, 2)}`;
+}
+
 /**
  * The same, for a payload that came from the wg-easy API: marks it as untrusted
  * and caps its size.
@@ -47,9 +51,9 @@ export function jsonResult(data: Record<string, unknown>): CallToolResult {
  * The marker goes in both channels. A client that reads `structuredContent` and
  * ignores `content` — which is the point of declaring an output schema — would
  * otherwise receive client names and DNS entries with no framing at all, and
- * the framing is the guard. The two marker names are stripped from the payload
- * before they are set, so the guard cannot be switched off by the content it
- * guards against.
+ * the framing is the guard. The three reserved names are stripped from the
+ * payload before they are set, so neither the guard nor the truncation note can
+ * be switched off, or contradicted, by the content it guards against.
  *
  * `followUp` names the call that retrieves the rest, so a truncated response is
  * still actionable.
@@ -58,19 +62,18 @@ export function upstreamResult(
   data: Record<string, unknown>,
   followUp: string
 ): CallToolResult {
-  const { untrusted: _untrusted, source: _source, ...rest } = data;
-  const marked = {
-    untrusted: true as const,
-    source: 'wg-easy' as const,
-    ...budget(rest, followUp),
-  };
+  const {
+    untrusted: _untrusted,
+    source: _source,
+    truncated: _truncated,
+    ...rest
+  } = data;
+  const marked = budget(
+    { untrusted: true as const, source: 'wg-easy' as const, ...rest },
+    followUp
+  );
   return {
-    content: [
-      {
-        type: 'text',
-        text: `${UNTRUSTED_MARKER}\n\n${JSON.stringify(marked, null, 2)}`,
-      },
-    ],
+    content: [{ type: 'text', text: render(marked) }],
     structuredContent: marked,
   };
 }
@@ -83,6 +86,11 @@ export function upstreamResult(
  * document sliced mid-string is not a smaller answer, it is an unparseable one,
  * and the two channels have to carry the same value. So the *object* is
  * trimmed, and what was cut is stated in a field.
+ *
+ * What is measured is what leaves. The compact serialisation used to be the
+ * ruler while the indented one plus the marker paragraph was the thing sent —
+ * 53 329 characters measured against 86 949 emitted for the same client list,
+ * so the ceiling held for a string nobody ever received.
  *
  * Two passes, in this order, because the two oversized payloads this server
  * actually produces are different shapes:
@@ -101,18 +109,22 @@ function budget(
   data: Record<string, unknown>,
   followUp: string
 ): Record<string, unknown> {
-  if (JSON.stringify(data).length <= MAX_UPSTREAM_LENGTH) return data;
+  if (render(data).length <= MAX_UPSTREAM_LENGTH) return data;
 
   const copy = structuredClone(data);
-  const cut: Record<string, { shown: number; total: number }> = {};
+  const cut = new Map<string, { shown: number; total: number }>();
   const withNote = (): Record<string, unknown> => ({
+    ...copy,
+    // After the spread, not before it: a record that carries a field called
+    // `truncated` must not be able to overwrite the sentence that says the
+    // answer was shortened. `upstreamResult` also strips the name on the way
+    // in, so this is the second of two locks on the same door.
     truncated: {
       note:
         `The answer was shortened to stay inside the ${MAX_UPSTREAM_LENGTH}-character ` +
         `result budget. ${followUp}`,
-      fields: cut,
+      fields: Object.fromEntries(cut),
     },
-    ...copy,
   });
 
   for (;;) {
@@ -129,12 +141,22 @@ function budget(
     // then no shorter one can either, so the pass is finished; what is left is
     // a payload made of many small pieces, which is the array pass's problem.
     if (shortened.length >= slot.value.length) break;
-    (slot.container as Record<string | number, unknown>)[slot.key] = shortened;
-    cut[slot.path] = {
+    // `defineProperty`, not `container[key] = …`: a key of `__proto__` would
+    // otherwise run the prototype setter, drop the write, and leave this pass
+    // finding the same oversized slot on every round. The boundary removes that
+    // key before anything gets here; this is what keeps the loop safe if one
+    // ever arrives by another road.
+    Object.defineProperty(slot.container, slot.key, {
+      value: shortened,
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
+    cut.set(slot.path, {
       shown: keep,
-      total: cut[slot.path]?.total ?? slot.value.length,
-    };
-    if (JSON.stringify(withNote()).length <= MAX_UPSTREAM_LENGTH) {
+      total: cut.get(slot.path)?.total ?? slot.value.length,
+    });
+    if (render(withNote()).length <= MAX_UPSTREAM_LENGTH) {
       return withNote();
     }
   }
@@ -142,10 +164,10 @@ function budget(
   for (;;) {
     const slot = longestArray(copy);
     if (slot === undefined || slot.array.length === 0) break;
-    const total = cut[slot.path]?.total ?? slot.array.length;
+    const total = cut.get(slot.path)?.total ?? slot.array.length;
     slot.array.length = Math.floor(slot.array.length / 2);
-    cut[slot.path] = { shown: slot.array.length, total };
-    if (JSON.stringify(withNote()).length <= MAX_UPSTREAM_LENGTH) {
+    cut.set(slot.path, { shown: slot.array.length, total });
+    if (render(withNote()).length <= MAX_UPSTREAM_LENGTH) {
       return withNote();
     }
   }
@@ -165,10 +187,10 @@ export class ResultTooLargeError extends Error {}
 function longestString(
   root: unknown
 ):
-  | { container: unknown; key: string | number; value: string; path: string }
+  | { container: object; key: string | number; value: string; path: string }
   | undefined {
   let best:
-    | { container: unknown; key: string | number; value: string; path: string }
+    | { container: object; key: string | number; value: string; path: string }
     | undefined;
   const visit = (value: unknown, path: string): void => {
     if (Array.isArray(value)) {
@@ -235,25 +257,37 @@ export interface TruncationNote {
   fields: Record<string, { shown: number; total: number }>;
 }
 
-const MAX_ERROR_BODY_LENGTH = 2000;
+const MAX_ERROR_BODY_LENGTH = 200;
 
 /**
- * Limits what an upstream error body can inject into the model context:
- * HTML error pages (reverse proxies, WAFs) are dropped entirely and other
- * bodies are truncated.
+ * What the instance wrote, on its way into an error message.
+ *
+ * Three things at once, and each is a separate reason. It is **labelled**,
+ * because an error body reaches the model as this server's own sentence
+ * otherwise, and a proxy that answers `401` with a page of instructions is
+ * exactly the kind of text that gets followed. It is **cleaned**, because an
+ * ESC in it is a terminal escape sequence in whatever renders the transcript.
+ * And it is **cut short**, because an error result is built from a message and
+ * no budget measures it — the size ceiling of the success path does not apply
+ * here at all.
+ *
+ * HTML-shaped bodies (reverse proxies, WAF block pages) are dropped whole: they
+ * are never the hint, and they are the largest.
  */
-function sanitizeErrorBody(body: string): string {
-  const trimmed = body.trim();
-  // Anything markup-shaped: a reverse proxy's error page or a WAF block page.
+export function upstreamText(
+  body: string,
+  max = MAX_ERROR_BODY_LENGTH
+): string {
+  const trimmed = cleanText(body).trim();
+  if (trimmed === '') return '';
   // The check is deliberately loose — an XML declaration, a leading comment or
   // a doctype followed by a newline are all the same thing here.
   if (/^(<!doctype|<html[\s>]|<\?xml|<!--)/i.test(trimmed)) {
-    return '(HTML error page omitted)';
+    return '(untrusted text from the instance): (HTML error page omitted)';
   }
-  if (trimmed.length > MAX_ERROR_BODY_LENGTH) {
-    return `${trimmed.slice(0, MAX_ERROR_BODY_LENGTH)}… (truncated)`;
-  }
-  return trimmed;
+  const shown =
+    trimmed.length > max ? `${trimmed.slice(0, max)}… (truncated)` : trimmed;
+  return `(untrusted text from the instance): ${shown}`;
 }
 
 /**
@@ -280,10 +314,13 @@ export async function run(
           '\nHint: check WG_EASY_USERNAME/WG_EASY_PASSWORD. Note that the wg-easy API only supports Basic Authentication and does not work while 2FA (TOTP) is enabled for the account.';
       }
       return errorResult(
-        `${error.message}\n${sanitizeErrorBody(error.body)}${hint}`
+        `${error.message}\n${upstreamText(error.body)}${hint}`
       );
     }
+    // Not necessarily this server's words either: a TLS failure names the
+    // certificate's subject alternative names, which whatever answered on the
+    // port chose, and undici quotes a rejected header value in full.
     const message = error instanceof Error ? error.message : String(error);
-    return errorResult(`wg-easy-mcp: ${message}`);
+    return errorResult(`wg-easy-mcp: ${cleanText(message).slice(0, 2000)}`);
   }
 }

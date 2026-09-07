@@ -192,6 +192,45 @@ describe('the fixed cross-document anchors', () => {
     );
   });
 
+  it('keeps the replay defence the security documents promise', () => {
+    // Both documents used to argue the replay path away from a
+    // `supportedProtocolVersions` default that `serveStdio` stopped taking, and
+    // the sentence outlived the change. They now name a *mechanism* instead —
+    // the nonce mcp-approval spends on the first answer — so what is asserted
+    // here is that the mechanism is still installed. Testing the era constant
+    // next to it is the mistake this replaces: it stayed green through two
+    // releases while the claim it stood for was false.
+    const version = (
+      JSON.parse(read('package.json')) as {
+        dependencies: Record<string, string>;
+      }
+    ).dependencies['mcp-approval'];
+    const [major, minor, patch] = String(version)
+      .replace(/^[^0-9]*/, '')
+      .split('.')
+      .map(Number);
+    expect(
+      major === 0 &&
+        (minor ?? 0) >= 8 &&
+        ((minor ?? 0) > 8 || (patch ?? 0) >= 1),
+      `mcp-approval ${String(version)} predates the nonce (0.8.1)`
+    ).toBe(true);
+    for (const name of ['SECURITY.md', 'docs/guide/security.md']) {
+      const document = read(name);
+      // The claim, not a word near it: the entry point negotiates both eras and
+      // the nonce is what answers for the later one. Either sentence going
+      // missing means the document has drifted back.
+      expect(document, name).toContain('serveStdio');
+      expect(document, name).toContain('nonce');
+      expect(document.toLowerCase(), name).not.toContain(
+        'no replay defence has been built'
+      );
+      expect(document.toLowerCase(), name).not.toContain(
+        'no replay defence is built here'
+      );
+    }
+  });
+
   it('keeps the changelog include by region, never by line range', () => {
     // A line range depends on how long the file's header happens to be and fails
     // silently when it grows — the newest release simply stops appearing.

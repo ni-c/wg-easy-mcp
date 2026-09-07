@@ -20,15 +20,15 @@ The MCP client decides which tools get called. Creating, changing, enabling or d
 
 ## What the confirmation proves
 
-Both confirmation paths bind an answer to **one operation with one set of arguments**. Neither proves the answer is recent: a sealed `requestState` that opens onto an operation opens onto it whenever it is replayed.
+Both confirmation paths bind an answer to **one operation with one set of arguments**, and both are single-use.
 
-No replay defence is built here, because in this deployment shape there is nothing to replay:
+On protocol revision `2026-07-28` the dialog is a _return value_: a sealed `requestState` travels out through the client and comes back carrying the answer. A seal proves binding — "this answer belongs to this question" — and nothing else, so on its own the same state and the same ticked box would replay for the state's whole lifetime. That matters most for the two calls that grant rather than destroy: `create_client` issues a credential that reaches every network behind the VPN, and `generate_one_time_link` mints an unauthenticated download URL for a peer's private key.
 
-- The sealing key is 32 random bytes per process, and this is a stdio server spawned per session.
-- `requestState` only crosses the wire on protocol revision `2026-07-28`. This server does not set `supportedProtocolVersions`, so it takes the SDK's default list, which ends at `2025-11-25`; on that revision the SDK bridges the elicitation server-side and the value never leaves the process.
-- The `confirm_token` path is single-use and expires after five minutes.
+This server does negotiate that revision. `src/index.ts` serves through `serveStdio`, whose opening exchange selects `2025-11-25` or `2026-07-28` per connection — so the replay path is reachable, not hypothetical, and an earlier version of this document argued the opposite from a `supportedProtocolVersions` default that the entry point stopped taking when it moved off `StdioServerTransport`.
 
-If any of those three changes — a negotiated `2026-07-28`, or two processes sharing one sealing key — a nonce becomes necessary, first for `create_client` and `generate_one_time_link`.
+What defends it is `mcp-approval` ≥ 0.8.1: every sealed state carries a nonce that is **spent the first time an answer arrives with it**, accepted or declined. A state presented a second time counts as no answer at all and produces a fresh question, the same way the `confirm_token` path spends its token. The token path is single-use and expires after five minutes.
+
+The honest residual: the record of spent states lives in the process, next to the 32-byte sealing key that is also generated per process. A restart forgets both — which ends the session the states belonged to as well — and a deployment that served the two halves of one flow from two processes would have neither. This is a stdio server spawned per session, so that shape does not arise here.
 
 ## Deployment recommendations
 

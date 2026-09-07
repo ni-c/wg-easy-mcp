@@ -80,10 +80,22 @@ See [Asking a person](/guide/approval).
 
 ### Key material is redacted
 
-Everything the wg-easy API hands back is filtered before it is returned. Keys
-named `privateKey`, `preSharedKey`, `password`, `passwordHash`, `sessionSecret`
-or anything starting with `totp` are replaced with `[redacted]` at every nesting
+Everything the wg-easy API hands back is filtered before it is returned. A key
+is sensitive by what it **ends in**, matched on the name with `_` and `-`
+removed and lower-cased: `password`, `passwordHash`, `passwd`, `passphrase`,
+`secret`, `token`, `apiKey`, `privateKey`, `preSharedKey`, plus anything
+starting with `totp`. The value is replaced with `[redacted]` at every nesting
 level.
+
+The suffix rule is there because an exact list is only as good as the backend's
+naming. `GET /api/admin/general` carries the argon2 hash of the metrics token as
+`metricsPassword`, and `password` matched `password` and not that — so until
+0.6.0 the hash reached the model through a tool whose description promises the
+opposite. Every `<prefix>Secret` wg-easy invents next is covered now without
+anybody having to notice it.
+
+`key` is deliberately **not** a suffix. It would take `publicKey` — which is how
+a peer is identified, and is public — and every `*_key` identifier with it.
 
 That covers two different secrets. `get_server_info` reads the admin endpoints,
 which carry the WireGuard **server** private key. `get_client` reads a single
@@ -133,62 +145,124 @@ that cannot be taken back has to be named explicitly — applied to disclosure
 rather than to destruction. Before 0.5.0 both tools counted as read tools, so
 `WG_EASY_READ_ONLY` changed nothing about them.
 
-### The two-call token proves binding, not freshness
+### What binds an approval, and what makes it stale
 
 Where a client cannot show a dialog, a guarded tool hands back a `confirm_token`
 and acts only on a second call carrying it. Where a client _can_, the reply
 comes back sealed (HMAC) and carries the resource key of the operation it
 answered.
 
-Both mechanisms bind an answer to **one operation with one set of arguments**.
-Neither proves that the answer is _recent_. A sealed `requestState` that opens
-onto the same operation opens onto it whenever it is replayed, and the library
-says so.
+Both mechanisms bind an answer to **one operation with one set of arguments**. A
+seal on its own does not prove the answer is _recent_: a sealed `requestState`
+that opens onto an operation opens onto it whenever it is replayed, and the
+library says so.
 
-In this server that gap is closed by the surroundings rather than by a
-mechanism, and it is worth writing down which surroundings, because they are
-what a future change could remove:
+That path is reachable here. `src/index.ts` serves through `serveStdio`, whose
+opening exchange selects `2025-11-25` or `2026-07-28` per connection, and on the
+later revision the dialog _is_ the return value — the sealed state travels out
+through the client and comes back with the answer.
 
-- The sealing key is 32 random bytes **per process**. This is a stdio server
-  spawned per session, so a state sealed in one session cannot be opened in the
-  next.
-- `requestState` only travels over the wire on protocol revision `2026-07-28`.
-  On `2025-11-25` the SDK bridges the elicitation server-side and the value never
-  leaves the process. This server offers neither revision explicitly: it does not
-  set `supportedProtocolVersions`, so it takes the SDK's default list, which ends
-  at `2025-11-25`.
-- The `confirm_token` path is single-use by construction — `ConfirmationStore`
-  consumes the token — and expires after five minutes.
+::: warning This section used to say the opposite
+Until 0.6.0 it argued that the server "does not set `supportedProtocolVersions`,
+so it takes the SDK's default list, which ends at `2025-11-25`". That stopped
+being true when the entry point moved from a hand-wired `StdioServerTransport`
+to `serveStdio`, which negotiates both eras — and the sentence stayed. A claim
+in a security document that names a class or a protocol revision is only as good
+as the last time somebody checked it against the source.
+:::
 
-So there is nothing here to replay, and **no replay defence has been built**. If
-this server ever negotiates `2026-07-28`, or serves two halves of one flow from
-two processes with a shared key, this section stops being true and a nonce is
-needed. That applies first to `create_client` and `generate_one_time_link`,
-whose approvals are the ones worth stealing.
+What closes the gap is a mechanism, not the surroundings: `mcp-approval` ≥ 0.8.1
+puts a nonce in every sealed state and **spends it the first time an answer
+arrives** — accepted or declined. The same state presented again counts as no
+answer at all and produces a fresh question, exactly as the `confirm_token` path
+consumes its token. The token path is single-use through `ConfirmationStore` and
+expires after five minutes.
+
+Two things are still worth writing down, because a future change could remove
+them:
+
+- The record of spent states and the 32-byte sealing key both live **in the
+  process**. A restart forgets them — along with the session they belonged to.
+- A deployment that served the two halves of one flow from two processes with a
+  shared key would have neither guarantee. This is a stdio server spawned per
+  session, so that shape does not arise.
 
 ### Upstream content is marked untrusted
 
 Client names, DNS entries and endpoints are free-form strings chosen by whoever
 administers the VPN. Everything the wg-easy API returns is prefixed with an
 explicit untrusted-data marker telling the model to treat the block as data to
-report rather than instructions to follow, and is capped at 60 000 characters so
-a single oversized field cannot flood the context.
+report rather than instructions to follow, and is capped at 60 000 characters —
+measured on the text that is actually emitted — so a single oversized field
+cannot flood the context.
+
+Those strings are also **cleaned**: C0 and C1 control characters, DEL and the
+BiDi override and isolate characters are removed from every value and every
+field name in a record. An ESC begins a terminal escape sequence in whatever
+renders the transcript, and a right-to-left override reorders the line around
+it — a client name is an odd place to find either.
+
+Two answers are exempt and stay byte-exact, because they have to work as files:
+`get_client_config` and `get_client_qrcode`. A control character in one of those
+is reported in a `warning` field instead of being removed.
+
+### Nothing the instance sends is taken on trust
+
+A JSON body is read with a TypeScript cast, which checks nothing, and the SDK
+validates every answer against the tool's output schema before it leaves. Those
+two facts meet badly: an `id` spelled as a string, a `1e999` in `transferRx` —
+`Infinity` after `JSON.parse`, which `z.number()` refuses — or a numeric `name`
+in one record used to answer the **whole** `list_clients` with
+`Output validation error` and no cause.
+
+Every field the schema types is now read with a check of that exact type at the
+boundary, and a value that fails it is left out rather than passed on. A list
+entry that is not a record at all is left out and **counted** in `skipped`, not
+dropped in silence.
 
 ### Transport
 
 - Requests carry a **15-second timeout** and `redirect: 'error'` — following a
   redirect would hand the `Authorization` header to whatever host it points at.
+- A successful body is refused above **8 MiB** — a declared `content-length`
+  before a byte is read, otherwise the reader is cancelled at the ceiling. The
+  timeout does not cover this: it is spent once the headers arrive, so a body
+  that never ends was a process that never answered again.
+- The **status is read before the body**, and a failed one is read under its own
+  64 KiB ceiling that cuts rather than refuses — so a `401` behind a reverse
+  proxy's login page is still a `401` with a credential hint.
+- A **refused login is repeated from memory for ten seconds** rather than
+  retried. Every tool call carries the admin credentials, so every call is a
+  login attempt, and `401` is the answer a model reads as transient. Only `401`;
+  a `403` is a permission, not a guess.
 - `WG_EASY_INSECURE_TLS` is a **scoped undici dispatcher**, so relaxed
   certificate validation applies to the wg-easy connection only and never
   process-wide.
-- A URL carrying embedded credentials is rejected at startup rather than logged.
+- A URL carrying embedded credentials is rejected at startup rather than logged,
+  and only its origin and path are kept — a query or fragment would otherwise be
+  glued in front of every request path.
 - Credentials are removed from `process.env` after the config is read.
 
 ### Error output
 
-Upstream error bodies are truncated to 2 000 characters, and HTML error pages —
-the usual output of a reverse proxy or WAF — are dropped entirely instead of
-being pasted into the model's context.
+Upstream error bodies are labelled `(untrusted text from the instance)`,
+stripped of control characters and cut at 200 characters; HTML error pages — the
+usual output of a reverse proxy or WAF — are dropped entirely instead of being
+pasted into the model's context. The label and the cut matter because an error
+result is built from a message, and no result budget measures one.
+
+### Diagnostics do not echo values
+
+A startup message that says "got `<value>`" prints whatever was pasted into the
+wrong variable, to stderr, which is the MCP client's log. `WG_EASY_URL` sits one
+line above `WG_EASY_PASSWORD` in every compose file, and `ELICITATION` is
+unprefixed and in the same block.
+
+So the "not a valid URL" message names no value; the non-http(s) message names
+no **scheme**, because a hexadecimal key with a colon after it is a valid URL
+whose scheme is the key; and `ELICITATION` quotes only a short word-shaped value
+(`/^[A-Za-z0-9_-]{1,12}$/`, so a genuine typo is still shown) and describes
+anything else by its length alone.
 
 ## Deployment recommendations
 
@@ -206,5 +280,12 @@ Releases are published to npm via
 [Trusted Publishing](https://docs.npmjs.com/trusted-publishers) with
 [provenance](https://docs.npmjs.com/generating-provenance-statements) — no
 long-lived token exists to leak. Container images ship an SBOM and
-`provenance: mode=max`. CI runs `npm audit`, CodeQL and a Trivy scan of the
-image on every push and once a week; the runtime image contains no npm at all.
+`provenance: mode=max`. CI runs `npm audit`, CodeQL, a Trivy scan of the image
+and `actions/dependency-review-action` — which checks what a pull request
+_adds_, rather than the tree as it stands — on every push and once a week.
+
+Both jobs that hold an OIDC token install with `--ignore-scripts`, so no
+dependency's lifecycle hook runs while a credential that can publish this
+package is available, and `mcp-publisher` is pinned to a release tag with its
+published sha256 checked rather than fetched from `releases/latest`. The runtime
+image contains no npm, corepack or yarn at all.
