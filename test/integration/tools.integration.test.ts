@@ -113,8 +113,9 @@ describe('a client through its whole life', () => {
     // private key and pre-shared key in full, and only `get_server_info` used
     // to redact. The key now never leaves the process — `get_client_config`
     // exists for the case where somebody genuinely wants it, deliberately and
-    // on request.
-    expect(one.privateKey).toBe('[redacted]');
+    // on request. Since wg-easy 15.5.0 the single-client read omits the key
+    // upstream as well, so absent is as good as redacted — a real key is not.
+    expect([undefined, '[redacted]']).toContain(one.privateKey);
   });
 
   it('hands out a configuration generated from that key pair', async () => {

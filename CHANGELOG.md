@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- #region changelog -->
 
+## [Unreleased]
+
+### Fixed
+
+- `update_client` works against wg-easy 15.5.0. That release made seven
+  AmneziaWG fields (`contentPaddingAddition`, `rekeyAfterTime`,
+  `rekeyTimeout`, `rejectAfterTime`, `keepaliveTimeout`,
+  `maxHandshakeAttempts`, `disableCookies`) required in the update body, so
+  every update, a plain rename included, failed with HTTP 400. They are now
+  carried over from the client's current state, and sent as `null` to older
+  versions, which ignore them.
+
 ## [0.6.0] - 2026-09-07
 
 ### Added
