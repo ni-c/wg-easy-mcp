@@ -390,6 +390,78 @@ describe('update_client', () => {
     expect(body).not.toHaveProperty('createdAt');
   });
 
+  it('carries the AmneziaWG fields wg-easy 15.5 requires over unchanged', async () => {
+    // 15.5.0 made these required (nullable) in ClientUpdateSchema; leaving
+    // them out answered every rename with HTTP 400.
+    const current = {
+      id: 3,
+      name: 'erin',
+      contentPaddingAddition: '8-16',
+      rekeyAfterTime: '120',
+      rekeyTimeout: null,
+      rejectAfterTime: null,
+      keepaliveTimeout: '10',
+      maxHandshakeAttempts: null,
+      disableCookies: false,
+    };
+    const calls = stubFetch((url, init) =>
+      init?.method === 'GET'
+        ? jsonResponse(current)
+        : jsonResponse({ success: true })
+    );
+    const client = await connect({}, 'accept');
+
+    await client.callTool({
+      name: 'update_client',
+      arguments: { clientId: 3, name: 'frank' },
+    });
+
+    const post = calls.find((c) => c.init?.method === 'POST');
+    const body = JSON.parse(String(post?.init?.body));
+    expect(body).toMatchObject({
+      name: 'frank',
+      contentPaddingAddition: '8-16',
+      rekeyAfterTime: '120',
+      rekeyTimeout: null,
+      rejectAfterTime: null,
+      keepaliveTimeout: '10',
+      maxHandshakeAttempts: null,
+      disableCookies: false,
+    });
+  });
+
+  it('sends the 15.5 fields as null to an instance that does not report them', async () => {
+    // wg-easy 15.4 neither returns nor validates them; its schema strips
+    // unknown keys, so null is harmless there and valid on 15.5.
+    const current = { id: 3, name: 'grace', enabled: true };
+    const calls = stubFetch((url, init) =>
+      init?.method === 'GET'
+        ? jsonResponse(current)
+        : jsonResponse({ success: true })
+    );
+    const client = await connect({}, 'accept');
+
+    await client.callTool({
+      name: 'update_client',
+      arguments: { clientId: 3, name: 'heidi' },
+    });
+
+    const post = calls.find((c) => c.init?.method === 'POST');
+    const body = JSON.parse(String(post?.init?.body));
+    for (const field of [
+      'contentPaddingAddition',
+      'rekeyAfterTime',
+      'rekeyTimeout',
+      'rejectAfterTime',
+      'keepaliveTimeout',
+      'maxHandshakeAttempts',
+      'disableCookies',
+    ]) {
+      expect(body[field]).toBeNull();
+    }
+    expect(body.enabled).toBe(true);
+  });
+
   it('strips hook fields (postUp etc.) sent by the caller', async () => {
     // The wg-easy server executes preUp/postUp/preDown/postDown as root
     // shell hooks. They are intentionally absent from the input schema and
