@@ -71,7 +71,7 @@ WG_EASY_URL=http://127.0.0.1:51821 WG_EASY_USERNAME=integration \
 ## Expectations
 
 - **Tests.** Behaviour changes come with a test that fails without the change.
-  CI runs on Node 22 and 24, plus oxlint, prettier, `npm audit`, CodeQL and a Trivy scan of the container image.
+  CI runs on Node 24 and 26, plus oxlint, prettier, `npm audit`, CodeQL and a Trivy scan of the container image.
 - **Comments** explain constraints the code cannot show — not what the next line does.
 - **Security-sensitive areas** (config parsing, confirmation tokens, anything that
   builds a request URL): please describe the attack you are defending against, or the
