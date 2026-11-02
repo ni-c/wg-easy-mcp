@@ -4,5 +4,5 @@
     "MCP server for wg-easy — inspect and administer your",
     "WireGuard clients, with deletes behind a confirmation token."
   ],
-  "badges": ["11 tools", "wg-easy v15+", "MIT", "Node ≥22"]
+  "badges": ["11 tools", "wg-easy v15+", "MIT"]
 }

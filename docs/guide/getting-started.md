@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- **Node.js ≥ 22** (22 and 24 are covered by CI)
+- **Node.js ≥ 24** (24 and 26 are covered by CI)
 - A running **wg-easy v15+** instance
 - An admin account on it with **2FA (TOTP) disabled**
 

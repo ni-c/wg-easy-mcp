@@ -50,7 +50,7 @@ harder would be making the safe move the slow one.
 
 ## Requirements
 
-- Node.js ≥ 22
+- Node.js ≥ 24
 - A running **wg-easy v15+** instance
 - **2FA (TOTP) must be disabled** for the account used by this server — the wg-easy API only supports Basic Authentication and does not work with 2FA enabled
 
@@ -360,7 +360,7 @@ npm run lint      # oxlint + prettier check
 npm run test:coverage
 ```
 
-CI runs the suite on Node 22 and 24 and adds `npm audit`, CodeQL and a Trivy scan of the container image on both architectures. See [CONTRIBUTING.md](CONTRIBUTING.md).
+CI runs the suite on Node 24 and 26 and adds `npm audit`, CodeQL and a Trivy scan of the container image on both architectures. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 The documentation site lives in `docs/` with its own manifest:
 
